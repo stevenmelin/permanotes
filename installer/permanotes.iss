@@ -1,6 +1,6 @@
 ; PermaNotes Windows installer (Inno Setup 6). Built by windows\Build Windows Installer.bat
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.3"
+  #define MyAppVersion "1.0.4"
 #endif
 #define MyAppName "PermaNotes"
 #define MyAppExe "PermaNotes.exe"
@@ -25,7 +25,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ChangesAssociations=yes
-CloseApplications=yes
+CloseApplications=no
+RestartApplications=no
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"
@@ -49,3 +50,28 @@ Root: HKA; Subkey: "Software\Classes\PermaNotes.File\shell\open\command"; ValueT
 
 [Run]
 Filename: "{app}\{#MyAppExe}"; Description: "Open PermaNotes now"; Flags: nowait postinstall skipifsilent
+
+[Code]
+// Close a running PermaNotes before installing/uninstalling, so Setup never has to ask.
+procedure CloseRunningPermaNotes();
+var
+  Code: Integer;
+begin
+  // ask it to close normally first (saves any last edit)...
+  if Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM PermaNotes.exe /T', '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0) then
+    Sleep(2500);
+  // ...then make sure nothing is left behind
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM PermaNotes.exe /T', '', SW_HIDE, ewWaitUntilTerminated, Code);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  CloseRunningPermaNotes();
+  Result := '';
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  CloseRunningPermaNotes();
+  Result := True;
+end;

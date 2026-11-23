@@ -94,6 +94,12 @@ check((r('src/components/Indent.ts').match(/isActive\('table'\)\) return false/g
 check(!/\.toolbar[^{]*\{[^}]*(flex-wrap:\s*nowrap|overflow-x:\s*auto)/.test(r('src/styles.css')), 'toolbar must wrap onto more rows, not scroll sideways');
 check(/syncToDevices/.test(r('src/App.tsx')) && /export async function syncToDevices/.test(r('src/lib/sync.ts')), 'Sync to Devices button not wired');
 
+// 1.0.4: closing must quit every process, and Setup must close a running copy itself
+check(/app\.on\('window-all-closed', \(\) => app\.quit\(\)\)/.test(main), 'closing the window must quit PermaNotes on every platform');
+check(/before-quit[\s\S]*app\.exit\(0\)/.test(main), 'missing forced-exit safety net on quit');
+check(/CloseApplications=no/.test(iss) && /function PrepareToInstall[\s\S]*CloseRunningPermaNotes/.test(iss) && /taskkill\.exe'\), '\/F \/IM PermaNotes\.exe/.test(iss), 'installer must close a running PermaNotes itself (no "applications are using files" page)');
+check(/function InitializeUninstall[\s\S]*CloseRunningPermaNotes/.test(iss), 'uninstaller must close a running PermaNotes');
+
 // 9. Every relative import in src resolves
 for (const f of files.filter((f) => f.startsWith('src/') && /\.(ts|tsx)$/.test(f))) {
   for (const m of r(f).matchAll(/from\s+'(\.[^']+)'/g)) {

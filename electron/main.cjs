@@ -63,7 +63,15 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
   });
 
-  app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+  // Closing the window quits PermaNotes completely (every background process), on Windows and Mac.
+  app.on('window-all-closed', () => app.quit());
+  let quitting = false;
+  app.on('before-quit', () => {
+    if (quitting) return;
+    quitting = true;
+    // safety net: if anything keeps the app alive (network, a stuck window), force it closed
+    setTimeout(() => app.exit(0), 4000).unref();
+  });
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 }
 
