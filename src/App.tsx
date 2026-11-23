@@ -5,7 +5,8 @@ import { ImportDialog } from './components/ImportDialog';
 import * as store from './lib/store';
 import { exportFolder, exportLibrary, exportNote, importPn } from './lib/pnio';
 import { onStatus, type SyncStatus } from './lib/sync';
-import { desktop } from './lib/platform';
+import { desktop, pickFiles } from './lib/platform';
+import { syncNow } from './lib/sync';
 import type { Folder, Note } from './lib/types';
 import { errText, stripHtml } from './lib/util';
 
@@ -20,6 +21,13 @@ function noteText(n: Note) {
   textCache.set(n.id, { at: n.updated_at, text });
   return text;
 }
+
+interface LayoutT { folders: boolean; list: boolean; toolbar: boolean; focus: boolean; width: number | null }
+function loadLayout(): LayoutT {
+  try { return { folders: true, list: true, toolbar: true, focus: false, width: null as number | null, ...JSON.parse(localStorage.getItem('pn.layout') ?? '{}') }; }
+  catch { return { folders: true, list: true, toolbar: true, focus: false, width: null as number | null }; }
+}
+type Layout = LayoutT;
 
 function loadExpanded(): Set<string> {
   try { return new Set(JSON.parse(localStorage.getItem('pn.expanded') ?? '[]') as string[]); } catch { return new Set(); }
@@ -38,7 +46,20 @@ export default function App() {
   const [sync, setSync] = useState<SyncStatus | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [menuCmd, setMenuCmd] = useState<{ id: string; n: number } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [layout, setLayoutState] = useState<Layout>(loadLayout);
+  const setLayout = (p: Partial<Layout>) => setLayoutState((l) => { const n = { ...l, ...p }; localStorage.setItem('pn.layout', JSON.stringify(n)); return n; });
+  const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 760px)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 760px)');
+    const h = () => setNarrow(mq.matches);
+    mq.addEventListener('change', h);
+    return () => mq.removeEventListener('change', h);
+  }, []);
+  // On iPhone the panes are pages you swipe between, so the desktop show/hide settings don't apply.
+  const showFolders = narrow || (layout.folders && !layout.focus);
+  const showList = narrow || (layout.list && !layout.focus);
 
   const fail = (m: string) => setErrors((e) => [...e, m]);
   const say = (m: string) => { setToast(m); setTimeout(() => setToast((t) => (t === m ? null : t)), 6000); };
@@ -92,6 +113,26 @@ export default function App() {
   }, [store.getVersion(), view, query, sortRecent]);
 
   const note = selected ? store.state.notes.get(selected) ?? null : null;
+
+  // File / View menu (desktop) and keyboard shortcuts
+  useEffect(() => {
+    desktop?.onMenu((id) => setMenuCmd((m) => ({ id, n: (m?.n ?? 0) + 1 })));
+    const key = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      let id: string | null = null;
+      if (e.key === 'Escape' && document.querySelector('.app.focus') && !document.querySelector('.modal')) id = 'exit-focus';
+      else if (desktop) id = null; // desktop: the File/View menu accelerators handle the rest
+      else if (mod && e.shiftKey && e.key.toLowerCase() === 'f') id = 'toggle-focus';
+      else if (mod && !e.shiftKey && e.key === '1') id = 'toggle-folders';
+      else if (mod && !e.shiftKey && e.key === '2') id = 'toggle-list';
+      else if (mod && !e.shiftKey && e.key === '3') id = 'toggle-toolbar';
+      else if (!desktop && mod && !e.shiftKey && e.key.toLowerCase() === 's') id = 'save-note';
+      if (id) { e.preventDefault(); setMenuCmd((m) => ({ id: id!, n: (m?.n ?? 0) + 1 })); }
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, []);
+
   const currentFolder = view.type === 'folder' ? view.id : null;
 
   const run = async (label: string, fn: () => Promise<unknown>) => {
@@ -123,6 +164,31 @@ export default function App() {
     </div>
   );
 
+  useEffect(() => {
+    if (!menuCmd) return;
+    const cur = selected ? store.state.notes.get(selected) : undefined;
+    switch (menuCmd.id) {
+      case 'new-note': void newNote(); break;
+      case 'new-folder': newFolder(view.type === 'folder' ? view.id : null); break;
+      case 'import-onenote': setShowImport(true); break;
+      case 'open-pn': void pickFiles('.pn', true).then((fs) => fs.forEach((f) => void run(`Opening ${f.name}…`, async () => say(await importPn(await f.arrayBuffer(), view.type === 'folder' ? view.id : null))))); break;
+      case 'save-note': if (cur && !cur.deleted) void run('Saving note…', async () => { const p = await exportNote(cur.id); if (p) say(`Saved ${p}`); }); else fail('Save note: select a note first.'); break;
+      case 'save-folder': if (view.type === 'folder') void run('Saving folder…', async () => { const p = await exportFolder(view.id); if (p) say(`Saved ${p}`); }); else fail('Save folder: select a folder on the left first.'); break;
+      case 'save-all': void run('Saving library…', async () => { const p = await exportLibrary(); if (p) say(`Saved ${p}`); }); break;
+      case 'sync-now': void run('Syncing…', () => syncNow()); break;
+      case 'settings': setShowSettings(true); break;
+      case 'backup-folder': void desktop?.showBackupFolder().catch((e) => fail(errText(e))); break;
+      case 'toggle-folders': setLayout({ folders: !layout.folders, focus: false }); break;
+      case 'toggle-list': setLayout({ list: !layout.list, focus: false }); break;
+      case 'toggle-toolbar': setLayout({ toolbar: !layout.toolbar }); break;
+      case 'toggle-focus': setLayout({ focus: !layout.focus }); break;
+      case 'exit-focus': setLayout({ focus: false }); break;
+      case 'reset-width': setLayout({ width: null }); break;
+      default: fail(`Unknown menu command: ${menuCmd.id}`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [menuCmd]);
+
   const renderFolder = (f: Folder, depth: number) => {
     const kids = childrenOf(f.id);
     const open = expanded.has(f.id);
@@ -152,8 +218,8 @@ export default function App() {
   const viewTitle = view.type === 'all' ? 'All notes' : view.type === 'trash' ? 'Trash' : view.type === 'tag' ? `#${view.tag}` : store.folderPath(view.id);
 
   return (
-    <div className={`app pane-${pane}`}>
-      <header>
+    <div className={`app pane-${pane}${layout.focus && !narrow ? ' focus' : ''}`}>
+      {(!layout.focus || narrow) && <header>
         <button className="only-mobile" onClick={() => setPane(pane === 'note' ? 'list' : 'nav')}>{pane === 'note' ? '‹ Notes' : '☰'}</button>
         <strong className="brand">PermaNotes</strong>
         <span className="spacer" />
@@ -161,7 +227,7 @@ export default function App() {
         <button onClick={() => setShowImport(true)}>Import</button>
         <button onClick={() => void run('Saving library…', async () => { const p = await exportLibrary(); if (p) say(`Saved ${p}`); })}>Save all .pn</button>
         <button onClick={() => setShowSettings(true)}>⚙</button>
-      </header>
+      </header>}
       {errors.length > 0 && (
         <div className="errors">
           {errors.map((e, i) => <pre key={i}>{e}</pre>)}
@@ -170,8 +236,8 @@ export default function App() {
       )}
       {busy && <div className="busy"><div className="bar indeterminate" /> {busy}</div>}
       {toast && <div className="toast" onClick={() => setToast(null)}>{toast}</div>}
-      <main>
-        <nav className="sidebar">
+      <main style={{ gridTemplateColumns: `${showFolders ? '250px ' : ''}${showList ? '300px ' : ''}minmax(0, 1fr)` }}>
+        {showFolders && <nav className="sidebar">
           <div className={view.type === 'all' ? 'nav-item active' : 'nav-item'} onClick={() => { setView({ type: 'all' }); setPane('list'); }}>🗂 All notes <span className="count">{store.liveNotes().length}</span></div>
           <div className="nav-head">Folders <button className="mini" title="New folder" onClick={() => newFolder(null)}>＋</button></div>
           {childrenOf(null).map((f) => renderFolder(f, 0))}
@@ -182,8 +248,8 @@ export default function App() {
           ))}
           <div className="nav-head" />
           <div className={view.type === 'trash' ? 'nav-item active' : 'nav-item'} onClick={() => { setView({ type: 'trash' }); setPane('list'); }}>🗑 Trash</div>
-        </nav>
-        <section className="list">
+        </nav>}
+        {showList && <section className="list">
           <div className="list-head">
             <div className="list-title">{viewTitle}</div>
             <input type="search" placeholder="Search…" value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -202,19 +268,27 @@ export default function App() {
             ))}
             {list.length === 0 && <div className="hint">{query ? 'No matches.' : 'No notes here yet.'}</div>}
           </div>
-        </section>
+        </section>}
         <section className="note">
           {note && !note.deleted && (
             <>
               <div className="note-bar">
+                <span className="pane-toggles">
+                  {!layout.focus && <>
+                    <button className={layout.folders ? 'tb on' : 'tb'} title="Show/hide folders (Ctrl+1)" onClick={() => setLayout({ folders: !layout.folders })}>📁</button>
+                    <button className={layout.list ? 'tb on' : 'tb'} title="Show/hide note list (Ctrl+2)" onClick={() => setLayout({ list: !layout.list })}>☰</button>
+                  </>}
+                  <button className={layout.toolbar ? 'tb on' : 'tb'} title="Show/hide formatting toolbar (Ctrl+3)" onClick={() => setLayout({ toolbar: !layout.toolbar })}>Aa</button>
+                </span>
                 <select value={note.folder_id ?? ''} onChange={(e) => void run('Moving…', () => store.updateNote(note.id, { folder_id: e.target.value || null }))}>
                   <option value="">(No folder)</option>
                   {folders.map((f) => ({ f, p: store.folderPath(f.id) })).sort((a, b) => a.p.localeCompare(b.p)).map(({ f, p }) => <option key={f.id} value={f.id}>{p}</option>)}
                 </select>
                 <span className="spacer" />
+                <button className="tb" title={layout.focus ? 'Exit full page (Esc)' : 'Full page view (Ctrl+Shift+F)'} onClick={() => setLayout({ focus: !layout.focus })}>{layout.focus ? '⤡' : '⤢'}</button>
                 <button onClick={() => { if (window.confirm('Move this note to Trash?')) void run('Deleting…', async () => { await store.updateNote(note.id, { deleted: true }); setSelected(null); setPane('list'); }); }}>Delete</button>
               </div>
-              <Editor note={note} onError={fail} onExport={() => void run('Saving note…', async () => { const p = await exportNote(note.id); if (p) say(`Saved ${p}`); })} />
+              <Editor note={note} onError={fail} showToolbar={layout.toolbar} textWidth={layout.width} onTextWidth={(w) => setLayout({ width: w })} onExport={() => void run('Saving note…', async () => { const p = await exportNote(note.id); if (p) say(`Saved ${p}`); })} />
             </>
           )}
           {note && note.deleted && (
@@ -223,7 +297,7 @@ export default function App() {
               <button onClick={() => void run('Restoring…', () => store.updateNote(note.id, { deleted: false }))}>Restore note</button>
             </div>
           )}
-          {!note && <div className="empty"><p>Select a note, or create a new one.</p></div>}
+          {!note && <div className="empty"><p>Select a note, or create a new one.</p>{layout.focus && <button onClick={() => setLayout({ focus: false })}>Exit full page</button>}{!layout.focus && (!layout.folders || !layout.list) && <button onClick={() => setLayout({ folders: true, list: true })}>Show folders and notes</button>}</div>}
         </section>
       </main>
       {showSettings && <Settings onClose={() => setShowSettings(false)} onError={fail} />}

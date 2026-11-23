@@ -23,6 +23,8 @@ interface Ctx {
   parser: ParserLike;
   mimeFor: (name: string) => string;
   pageTitle: string;
+  defaultFont: string;
+  defaultSize: string;
 }
 
 // Some XML parsers report 'one:Page' as the localName; normalise to 'Page'.
@@ -47,8 +49,14 @@ export function convertPage(xml: string, parser: ParserLike, newId: () => string
   const page = doc.documentElement;
   if (!page || ln(page) !== 'Page') throw new Error(`Expected a OneNote <Page>, found <${page ? ln(page) : 'nothing'}>`);
 
-  const ctx: Ctx = { quick: new Map(), tagDefs: new Map(), atts: [], warnings: [], newId, parser, mimeFor, pageTitle: page.getAttribute('name') ?? '' };
-  for (const q of kids(page, 'QuickStyleDef')) ctx.quick.set(q.getAttribute('index') ?? '', q.getAttribute('name') ?? '');
+  const ctx: Ctx = { quick: new Map(), tagDefs: new Map(), atts: [], warnings: [], newId, parser, mimeFor, pageTitle: page.getAttribute('name') ?? '', defaultFont: 'calibri', defaultSize: '11' };
+  for (const q of kids(page, 'QuickStyleDef')) {
+    ctx.quick.set(q.getAttribute('index') ?? '', q.getAttribute('name') ?? '');
+    if (q.getAttribute('name') === 'p') {
+      ctx.defaultFont = (q.getAttribute('font') ?? 'Calibri').toLowerCase();
+      ctx.defaultSize = String(parseFloat(q.getAttribute('fontSize') ?? '11'));
+    }
+  }
   for (const t of kids(page, 'TagDef')) ctx.tagDefs.set(t.getAttribute('index') ?? '', { name: t.getAttribute('name') ?? '', symbol: t.getAttribute('symbol') ?? '' });
 
   let title = page.getAttribute('name') ?? '';
@@ -87,8 +95,28 @@ function plainText(el: Element): string {
 const stripTags = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
 
 type Kind = 'task' | 'ul' | 'ol' | 'plain';
+interface KindInfo { kind: Kind; checked: boolean; label: string; marker: string; start: number }
 
-function oeKind(oe: Element, ctx: Ctx): { kind: Kind; checked: boolean; label: string } {
+// OneNote bullet codes -> PermaNotes bullet styles (matched against OneNote's on-screen symbols)
+const BULLETS: Record<string, string> = { '1': 'disc', '2': 'disc', '3': 'circle', '13': 'square', '25': 'dash', '15': 'dash', '17': 'dash' };
+const ROMAN: Record<string, number> = { i: 1, v: 5, x: 10, l: 50, c: 100 };
+function romanValue(s: string): number {
+  let t = 0;
+  for (let i = 0; i < s.length; i++) { const a = ROMAN[s[i]], b = ROMAN[s[i + 1]] ?? 0; t += a < b ? -a : a; }
+  return t;
+}
+// "a." -> type a, start 1; "iii." -> type i, start 3; "4)" -> type 1, start 4
+export function numberMarker(text: string): { type: string; start: number } {
+  const core = text.trim().replace(/[.)\]:]+$/, '');
+  if (/^\d+$/.test(core)) return { type: '1', start: parseInt(core, 10) };
+  if (/^[ivxlc]+$/.test(core) && (core.length > 1 || core === 'i')) return { type: 'i', start: romanValue(core) };
+  if (/^[IVXLC]+$/.test(core) && (core.length > 1 || core === 'I')) return { type: 'I', start: romanValue(core.toLowerCase()) };
+  if (/^[a-z]$/.test(core)) return { type: 'a', start: core.charCodeAt(0) - 96 };
+  if (/^[A-Z]$/.test(core)) return { type: 'A', start: core.charCodeAt(0) - 64 };
+  return { type: '1', start: 1 };
+}
+
+function oeKind(oe: Element, ctx: Ctx): KindInfo {
   let label = '';
   let task: { checked: boolean } | null = null;
   for (const t of kids(oe, 'Tag')) {
@@ -100,10 +128,19 @@ function oeKind(oe: Element, ctx: Ctx): { kind: Kind; checked: boolean; label: s
       label += `[${name}] `;
     }
   }
-  if (task) return { kind: 'task', checked: task.checked, label };
+  if (task) return { kind: 'task', checked: task.checked, label, marker: '', start: 1 };
   const list = kid(oe, 'List');
-  if (list) return { kind: kid(list, 'Number') ? 'ol' : 'ul', checked: false, label };
-  return { kind: 'plain', checked: false, label };
+  if (list) {
+    const num = kid(list, 'Number');
+    if (num) {
+      const m = numberMarker(num.getAttribute('text') ?? '1.');
+      const restart = num.getAttribute('restartNumberingAt');
+      return { kind: 'ol', checked: false, label, marker: m.type, start: restart ? parseInt(restart, 10) || m.start : m.start };
+    }
+    const b = kid(list, 'Bullet')?.getAttribute('bullet') ?? '2';
+    return { kind: 'ul', checked: false, label, marker: BULLETS[b] ?? 'disc', start: 1 };
+  }
+  return { kind: 'plain', checked: false, label, marker: '', start: 1 };
 }
 
 function convertOEChildren(oec: Element, ctx: Ctx, nested: boolean): string {
@@ -111,9 +148,15 @@ function convertOEChildren(oec: Element, ctx: Ctx, nested: boolean): string {
   let out = '';
   let i = 0;
   while (i < oes.length) {
-    const k = oeKind(oes[i], ctx).kind;
+    const first = oeKind(oes[i], ctx);
+    const k = first.kind;
     const group: Element[] = [];
-    while (i < oes.length && oeKind(oes[i], ctx).kind === k) group.push(oes[i++]);
+    while (i < oes.length) {
+      const ki = oeKind(oes[i], ctx);
+      // a new list starts when the kind or bullet/number style changes (or numbering restarts)
+      if (ki.kind !== k || (group.length && ki.marker !== first.marker) || (group.length && k === 'ol' && ki.start === 1 && ki.marker === first.marker && ki.start <= first.start)) break;
+      group.push(oes[i++]);
+    }
     if (k === 'plain' && !nested) {
       for (const oe of group) {
         out += oeBlocks(oe, ctx, oeKind(oe, ctx).label).join('');
@@ -123,7 +166,11 @@ function convertOEChildren(oec: Element, ctx: Ctx, nested: boolean): string {
       continue;
     }
     const tag = k === 'ol' ? 'ol' : 'ul';
-    const open = k === 'task' ? '<ul data-type="taskList">' : `<${tag}>`;
+    let open = `<${tag}>`;
+    if (k === 'plain') open = '<ul data-bullet="none">'; // indented text without a bullet, like OneNote
+    if (k === 'task') open = '<ul data-type="taskList">';
+    else if (k === 'ol') open = `<ol${first.marker !== '1' ? ` type="${first.marker}"` : ''}${first.start !== 1 ? ` start="${first.start}"` : ''}>`;
+    else if (k === 'ul' && first.marker !== 'disc') open = `<ul data-bullet="${first.marker}">`;
     out += open;
     for (const oe of group) {
       const info = oeKind(oe, ctx);
@@ -144,7 +191,8 @@ function oeBlocks(oe: Element, ctx: Ctx, label: string): string[] {
   for (const c of kids(oe)) {
     switch (ln(c)) {
       case 'T': {
-        const inner = (label ? esc(label) : '') + richText(c.textContent ?? '', ctx);
+        const wrap = styleWrap(`${oe.getAttribute('style') ?? ''};${c.getAttribute('style') ?? ''}`, ctx);
+        const inner = wrap.open + (label ? esc(label) : '') + richText(c.textContent ?? '', ctx) + wrap.close;
         label = '';
         const h = /^h([1-6])$/.exec(style);
         if (h) out.push(`<h${h[1]}>${inner}</h${h[1]}>`);
@@ -167,11 +215,40 @@ function oeBlocks(oe: Element, ctx: Ctx, label: string): string[] {
   return out;
 }
 
+let ctxForWalk: Ctx | null = null;
 function richText(cdata: string, ctx: Ctx): string {
   if (!/[<&]/.test(cdata)) return esc(cdata);
   const d = ctx.parser.parseFromString(`<!doctype html><html><body><div id="pn">${cdata}</div></body></html>`, 'text/html');
   const root = d.getElementById('pn') ?? d.body;
+  ctxForWalk = ctx;
   return walk(root);
+}
+
+const PLAIN_COLORS = new Set(['black', '#000000', '#000', 'windowtext', 'automatic', 'inherit', 'initial', 'auto']);
+// OneNote CSS -> PermaNotes text color / highlight / font / size. Values equal to the page default are dropped.
+export function styleWrap(css: string, ctx: { defaultFont: string; defaultSize: string }): { open: string; close: string } {
+  const decl = new Map<string, string>();
+  for (const part of css.replace(/&#xA;|&#10;|\n/g, ' ').split(';')) {
+    const i = part.indexOf(':');
+    if (i < 0) continue;
+    decl.set(part.slice(0, i).trim().toLowerCase(), part.slice(i + 1).trim());
+  }
+  const span: string[] = [];
+  const color = decl.get('color');
+  if (color && !PLAIN_COLORS.has(color.toLowerCase())) span.push(`color: ${color}`);
+  const font = decl.get('font-family');
+  if (font && font.toLowerCase() !== 'inherit' && font.replace(/['"]/g, '').toLowerCase() !== ctx.defaultFont) span.push(`font-family: ${font.replace(/"/g, "'")}`);
+  const size = decl.get('font-size');
+  if (size) {
+    const pt = parseFloat(size);
+    if (!Number.isNaN(pt) && String(pt) !== ctx.defaultSize) span.push(`font-size: ${pt}pt`);
+  }
+  const hl = decl.get('mso-highlight') ?? decl.get('background') ?? decl.get('background-color');
+  let open = '';
+  let close = '';
+  if (hl && !/^(transparent|none|white|#fff(fff)?|automatic|inherit)$/i.test(hl)) { open += `<mark data-color="${esc(hl)}">`; close = '</mark>' + close; }
+  if (span.length) { open += `<span style="${esc(span.join('; '))}">`; close = '</span>' + close; }
+  return { open, close };
 }
 
 function walk(node: Node): string {
@@ -188,8 +265,10 @@ function walk(node: Node): string {
       s += /^(https?:|mailto:|onenote:|file:)/i.test(href) ? `<a href="${esc(href)}">${inner}</a>` : inner;
       continue;
     }
-    let wrapped = inner;
-    const st = (el.getAttribute('style') ?? '').toLowerCase();
+    const rawStyle = el.getAttribute('style') ?? '';
+    const sw = styleWrap(rawStyle, ctxForWalk!);
+    let wrapped = sw.open + inner + sw.close;
+    const st = rawStyle.toLowerCase();
     if (name === 'b' || name === 'strong' || /font-weight:\s*(bold|[6-9]00)/.test(st)) wrapped = `<strong>${wrapped}</strong>`;
     if (name === 'i' || name === 'em' || /font-style:\s*italic/.test(st)) wrapped = `<em>${wrapped}</em>`;
     if (name === 'u' || /text-decoration:[^;]*underline/.test(st)) wrapped = `<u>${wrapped}</u>`;

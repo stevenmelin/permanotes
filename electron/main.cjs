@@ -67,7 +67,63 @@ if (!app.requestSingleInstanceLock()) {
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 }
 
+// ---------- application menu ----------
+const send = (id) => () => { if (win) win.webContents.send('pn:menu', id); };
+function buildMenu() {
+  const mac = process.platform === 'darwin';
+  const template = [
+    ...(mac ? [{ role: 'appMenu' }] : []),
+    {
+      label: 'File',
+      submenu: [
+        { label: 'New Note', accelerator: 'CmdOrCtrl+N', click: send('new-note') },
+        { label: 'New Folder', accelerator: 'CmdOrCtrl+Shift+N', click: send('new-folder') },
+        { type: 'separator' },
+        { label: 'Open .pn File…', accelerator: 'CmdOrCtrl+O', click: send('open-pn') },
+        { label: 'Import from OneNote…', click: send('import-onenote') },
+        { type: 'separator' },
+        { label: 'Save Note as .pn…', accelerator: 'CmdOrCtrl+S', click: send('save-note') },
+        { label: 'Save Folder as .pn…', click: send('save-folder') },
+        { label: 'Save All Notes as .pn…', accelerator: 'CmdOrCtrl+Shift+S', click: send('save-all') },
+        { type: 'separator' },
+        { label: 'Sync Now', accelerator: 'F5', click: send('sync-now') },
+        { label: 'Sync && Settings…', accelerator: 'CmdOrCtrl+,', click: send('settings') },
+        { label: 'Show Backup Folder', click: send('backup-folder') },
+        { type: 'separator' },
+        mac ? { role: 'close' } : { role: 'quit', label: 'Exit' },
+      ],
+    },
+    { role: 'editMenu' },
+    {
+      label: 'View',
+      submenu: [
+        { label: 'Show/Hide Folders', accelerator: 'CmdOrCtrl+1', click: send('toggle-folders') },
+        { label: 'Show/Hide Note List', accelerator: 'CmdOrCtrl+2', click: send('toggle-list') },
+        { label: 'Show/Hide Formatting Toolbar', accelerator: 'CmdOrCtrl+3', click: send('toggle-toolbar') },
+        { label: 'Full Page View', accelerator: 'CmdOrCtrl+Shift+F', click: send('toggle-focus') },
+        { label: 'Reset Text Width', click: send('reset-width') },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+        { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'reload' }, { role: 'toggleDevTools' },
+      ],
+    },
+    { role: 'windowMenu' },
+    {
+      role: 'help',
+      submenu: [
+        { label: 'PermaNotes on GitHub', click: () => shell.openExternal('https://github.com/stevenmelin/permanotes') },
+        { label: 'Download Latest Version', click: () => shell.openExternal('https://github.com/stevenmelin/permanotes/releases/latest') },
+        { label: `Version ${app.getVersion()}`, enabled: false },
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 function createWindow() {
+  buildMenu();
   win = new BrowserWindow({
     width: 1280, height: 820, minWidth: 700, minHeight: 500,
     title: 'PermaNotes',

@@ -1,7 +1,7 @@
 {
   "name": "permanotes",
   "productName": "PermaNotes",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Notes that sync between Windows, Mac and iPhone.",
   "author": "Steven Melin",
   "private": true,
@@ -19,9 +19,11 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.119.2",
     "@tiptap/core": "^3.35.0",
+    "@tiptap/extension-highlight": "^3.35.0",
     "@tiptap/extension-image": "^3.35.0",
     "@tiptap/extension-list": "^3.35.0",
     "@tiptap/extension-table": "^3.35.0",
+    "@tiptap/extension-text-style": "^3.35.0",
     "@tiptap/extensions": "^3.35.0",
     "@tiptap/pm": "^3.35.0",
     "@tiptap/react": "^3.35.0",

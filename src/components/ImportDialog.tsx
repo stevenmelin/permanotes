@@ -8,15 +8,16 @@ export function ImportDialog({ onClose, onError, onDone, targetFolder }: { onClo
   const [progress, setProgress] = useState<{ done: number; total: number; label: string } | null>(null);
   const [report, setReport] = useState<ImportReport | null>(null);
   const [fatal, setFatal] = useState('');
+  const [updateExisting, setUpdateExisting] = useState(true);
 
   const oneNote = async () => {
     const [f] = await pickFiles('.zip,application/zip');
     if (!f) return;
     setFatal(''); setReport(null); setProgress({ done: 0, total: 1, label: 'Opening zip…' });
     try {
-      const r = await importOneNoteExport(await f.arrayBuffer(), (done, total, label) => setProgress({ done, total, label }));
+      const r = await importOneNoteExport(await f.arrayBuffer(), (done, total, label) => setProgress({ done, total, label }), { updateExisting });
       setReport(r);
-      onDone(`Imported ${r.notes} OneNote pages.`);
+      onDone(`OneNote import: ${r.updated} updated, ${r.notes} added.`);
     } catch (e) {
       setFatal(errText(e)); onError(`OneNote import failed: ${errText(e)}`);
     } finally { setProgress(null); }
@@ -39,7 +40,8 @@ export function ImportDialog({ onClose, onError, onDone, targetFolder }: { onClo
           <>
             <button className="big" onClick={() => void oneNote()}>From OneNote…<span>Choose “OneNote Export.zip” made by the Export My OneNote tool</span></button>
             <button className="big" onClick={() => void pn()}>Open .pn file…<span>A note, folder, or whole library saved from PermaNotes</span></button>
-            <p className="small">Importing the same OneNote export twice creates duplicates.</p>
+            <label className="chk"><input type="checkbox" checked={updateExisting} onChange={(e) => setUpdateExisting(e.target.checked)} /> Update pages I already imported (no duplicates)</label>
+            <p className="small">Pages you haven't changed in PermaNotes are refreshed in place. Pages you have edited are kept, and the OneNote version is added beside them as “(re-imported)”.</p>
           </>
         )}
         {progress && (
@@ -53,7 +55,12 @@ export function ImportDialog({ onClose, onError, onDone, targetFolder }: { onClo
         {fatal && <pre className="err">{fatal}</pre>}
         {report && (
           <div>
-            <p><b>Done.</b> {report.notes} pages, {report.folders} folders, {report.attachments} images/attachments.</p>
+            <p><b>Done.</b> {report.updated} pages updated, {report.notes} pages added, {report.folders} new folders, {report.attachments} images/attachments.</p>
+            {report.keptEdits.length > 0 && (
+              <details open><summary>{report.keptEdits.length} page(s) you edited in PermaNotes were kept — the OneNote version was added as “(re-imported)”</summary>
+                {report.keptEdits.map((x, i) => <div key={i} className="small">{x}</div>)}
+              </details>
+            )}
             {report.failures.length > 0 && (
               <details open><summary className="err">{report.failures.length} problem(s) — these did NOT import</summary>
                 {report.failures.map((x, i) => <pre key={i} className="err">{x}</pre>)}

@@ -10,4 +10,5 @@ contextBridge.exposeInMainWorld('permanotes', {
   backupFolder: () => ipcRenderer.invoke('pn:backup-folder'),
   showBackupFolder: () => ipcRenderer.invoke('pn:show-backup-folder'),
   version: () => ipcRenderer.invoke('pn:version'),
+  onMenu: (cb) => ipcRenderer.on('pn:menu', (_e, id) => cb(id)),
 });

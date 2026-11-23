@@ -125,6 +125,19 @@ if (on.includes('data-pn-att')) check(att.includes("tag: 'div[data-pn-att]'") &&
 if (on.includes('data-type="taskList"')) check(/TaskList/.test(ed) && /TaskItem/.test(ed), 'importer emits task lists but the editor lacks TaskList/TaskItem');
 if (on.includes('<table>')) check(/TableKit/.test(ed), 'importer emits tables but the editor lacks table support');
 if (on.includes('<img')) check(/Image\.configure/.test(ed), 'importer emits images but the editor lacks Image');
+// Formatting the importer produces must survive in the editor (1.0.1: formatting was being dropped)
+if (on.includes('<mark data-color')) check(/Highlight\.configure\(\{ multicolor: true \}\)/.test(ed), 'importer emits highlights but the editor lacks multicolor Highlight');
+if (on.includes('<span style=')) check(/TextStyleKit/.test(ed), 'importer emits colored/sized text but the editor lacks TextStyleKit (color, font, size)');
+if (on.includes('data-bullet')) {
+  check(/StyledBulletList/.test(ed) && /bulletList: false/.test(ed), 'importer emits bullet styles but the editor bullet list does not keep data-bullet');
+  const css = r('src/styles.css');
+  for (const m of new Set([...on.matchAll(/'(disc|circle|square|dash|none)'/g)].map((x) => x[1]))) if (m !== 'disc') check(css.includes(`ul[data-bullet="${m}"]`), `styles.css has no rule for bullet style "${m}"`);
+}
+// Every desktop menu command is handled by the app
+const appSrc = r('src/App.tsx');
+for (const m of new Set([...main.matchAll(/send\('([\w-]+)'\)/g)].map((x) => x[1]))) check(appSrc.includes(`case '${m}':`), `menu command '${m}' (electron/main.cjs) is not handled in App.tsx`);
+check(/Menu\.setApplicationMenu/.test(main), 'desktop File menu is not installed');
+check(r('electron/preload.cjs').includes("ipcRenderer.on('pn:menu'") && main.includes("webContents.send('pn:menu'"), 'pn:menu IPC not wired both ways');
 check(r('src/lib/util.ts').includes('data-pn-att="'), 'attachmentIdsIn must find data-pn-att blocks (else .pn exports drop attachments)');
 
 // 12. iPhone web app: manifest + service worker wired

@@ -9,6 +9,7 @@ export interface DesktopBridge {
   backupFolder(): Promise<string>;
   showBackupFolder(): Promise<void>;
   version(): Promise<string>;
+  onMenu(cb: (id: string) => void): void;
 }
 
 declare global { interface Window { permanotes?: DesktopBridge } }

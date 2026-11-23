@@ -20,7 +20,8 @@ header button { white-space: nowrap; }
 header { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .brand { font-size: 17px; color: var(--accent); }
 .sync.synced { color: var(--ok); } .sync.error { color: var(--danger); border-color: var(--danger); } .sync.offline { color: #a66b00; }
-main { flex: 1; display: grid; grid-template-columns: 250px 300px 1fr; min-height: 0; }
+main { flex: 1; display: grid; grid-template-columns: 250px 300px minmax(0, 1fr); min-height: 0; min-width: 0; overflow: hidden; }
+main > * { min-width: 0; }
 .sidebar { overflow: auto; border-right: 1px solid var(--line); padding: 8px 0; }
 .nav-item { display: flex; align-items: center; gap: 4px; padding: 5px 8px; cursor: pointer; border-radius: 4px; margin: 0 6px; }
 .nav-item:hover { background: var(--accent-soft); } .nav-item.active { background: var(--accent-soft); font-weight: 600; }
@@ -51,7 +52,25 @@ main { flex: 1; display: grid; grid-template-columns: 250px 300px 1fr; min-heigh
 .toolbar { display: flex; flex-wrap: wrap; gap: 3px; padding: 6px 16px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); z-index: 2; }
 .tb { padding: 3px 8px; min-width: 30px; } .tb.on { background: var(--accent-soft); border-color: var(--accent); }
 .content { flex: 1; overflow: auto; padding: 8px 20px 80px; }
-.content .ProseMirror { outline: none; min-height: 60vh; line-height: 1.5; }
+.page { position: relative; max-width: 100%; padding-right: 14px; }
+.width-handle { position: absolute; top: 0; right: 0; bottom: 0; width: 10px; cursor: ew-resize; border-right: 2px dashed transparent; }
+.page:hover .width-handle, .width-handle:active { border-right-color: var(--line); }
+.width-handle:hover, .width-handle:active { border-right-color: var(--accent) !important; }
+/* OneNote-like text: Calibri 11pt, single spacing, no gaps between lines */
+.content .ProseMirror { outline: none; min-height: 60vh; font-family: Calibri, Carlito, "Segoe UI", -apple-system, sans-serif; font-size: 11pt; line-height: 1.25; }
+.ProseMirror p { margin: 0; min-height: 1.25em; }
+.ProseMirror h1, .ProseMirror h2, .ProseMirror h3 { margin: .4em 0 .2em; line-height: 1.2; }
+.ProseMirror ul, .ProseMirror ol { margin: 0; padding-left: 2.2em; }
+.ProseMirror li > p { margin: 0; }
+.ProseMirror li::marker { font-family: Calibri, Carlito, "Segoe UI", sans-serif; }
+.ProseMirror ul[data-bullet="circle"] { list-style-type: circle; }
+.ProseMirror ul[data-bullet="square"] { list-style-type: square; }
+.ProseMirror ul[data-bullet="dash"] { list-style-type: "-   "; }
+.ProseMirror ul[data-bullet="none"] { list-style-type: none; }
+.ProseMirror mark { color: inherit; border-radius: 0; padding: 0; }
+.app.focus .note-bar select { display: none; }
+.pane-toggles { display: flex; gap: 3px; }
+.tbsel { padding: 2px 4px; font-size: 13px; max-width: 120px; }
 .ProseMirror p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: var(--muted); float: left; height: 0; pointer-events: none; }
 .ProseMirror img { max-width: 100%; height: auto; border-radius: 4px; }
 .ProseMirror img.ProseMirror-selectednode { outline: 2px solid var(--accent); }
@@ -63,6 +82,7 @@ main { flex: 1; display: grid; grid-template-columns: 250px 300px 1fr; min-heigh
 .ProseMirror.resize-cursor { cursor: col-resize; }
 .tableWrapper { overflow-x: auto; }
 ul[data-type="taskList"] { list-style: none; padding-left: 4px; }
+ul[data-type="taskList"] li > div > p { margin: 0; }
 ul[data-type="taskList"] li { display: flex; gap: 8px; align-items: flex-start; }
 ul[data-type="taskList"] li > label { margin-top: 3px; }
 ul[data-type="taskList"] li > div { flex: 1; }
@@ -112,4 +132,9 @@ ul[data-type="taskList"] li[data-checked="true"] > div { color: var(--muted); te
   .content { padding: 8px 14px 120px; }
   .toolbar { padding: 6px 8px; overflow-x: auto; flex-wrap: nowrap; }
   input, select { font-size: 16px; } /* stops iPhone zooming on focus */
+  main { grid-template-columns: 1fr !important; }
+  .pane-toggles { display: none; }
+  .page { width: auto !important; }
+  .width-handle { display: none; }
+  .content .ProseMirror { font-size: 16px; }
 }
