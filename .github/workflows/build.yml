@@ -34,6 +34,8 @@ jobs:
   pages:
     needs: check
     runs-on: ubuntu-latest
+    # Needs a one-time switch: repo Settings > Pages > Source = "GitHub Actions". Installers still build without it.
+    continue-on-error: true
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
