@@ -59,8 +59,7 @@
         "ext": "pn",
         "name": "PermaNotes File",
         "description": "PermaNotes note or library",
-        "role": "Editor",
-        "icon": "icon"
+        "role": "Editor"
       }
     ],
     "mac": {

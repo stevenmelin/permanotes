@@ -67,6 +67,7 @@ check(existsSync(join(ROOT, 'build/icon.png')) && existsSync(join(ROOT, 'build/i
 
 // 7. .pn file association everywhere
 check(pkg.build?.fileAssociations?.some((a) => a.ext === 'pn'), 'package.json: .pn fileAssociation missing (Mac)');
+for (const a of pkg.build?.fileAssociations ?? []) if (a.icon) check(existsSync(join(ROOT, 'build', a.icon + '.icns')) && existsSync(join(ROOT, 'build', a.icon + '.ico')), `fileAssociations icon "${a.icon}" needs build/${a.icon}.icns AND .ico (Mac build fails otherwise)`);
 check(/Software\\Classes\\\.pn/.test(iss) && /"%1"/.test(iss), 'installer: .pn association missing (Windows)');
 const main = r('electron/main.cjs');
 check(/app\.on\('open-file'/.test(main), 'electron: macOS open-file handler missing');
