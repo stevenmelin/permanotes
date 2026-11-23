@@ -141,7 +141,9 @@ ul[data-type="taskList"] li[data-checked="true"] > div { color: var(--muted); te
 .app.narrow.pane-nav .sidebar { display: block; }
 .app.narrow .editor .title { font-size: 21px; padding: 10px 14px 2px; }
 .app.narrow .content { padding: 8px 14px 120px; }
-.app.narrow .toolbar { padding: 6px 8px; overflow-x: auto; flex-wrap: nowrap; }
+.app.narrow .toolbar { padding: 4px 6px; gap: 2px; }
+.app.narrow .tb { padding: 2px 5px; min-width: 26px; }
+.app.narrow .tbsel { max-width: 96px; }
 .app.narrow main { grid-template-columns: 1fr !important; }
 .app.narrow .pane-toggles { display: none; }
 .app.narrow .page { width: auto !important; }

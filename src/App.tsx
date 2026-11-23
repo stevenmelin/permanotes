@@ -8,7 +8,7 @@ import * as store from './lib/store';
 import { exportFolder, exportLibrary, exportNote, importPn } from './lib/pnio';
 import { onStatus, type SyncStatus } from './lib/sync';
 import { desktop, pickFiles } from './lib/platform';
-import { syncNow } from './lib/sync';
+import { syncToDevices } from './lib/sync';
 import type { Folder, Note } from './lib/types';
 import { errText, stripHtml } from './lib/util';
 
@@ -180,7 +180,7 @@ export default function App() {
       case 'save-note': if (cur && !cur.deleted) void run('Saving note…', async () => { const p = await exportNote(cur.id); if (p) say(`Saved ${p}`); }); else fail('Save note: select a note first.'); break;
       case 'save-folder': if (view.type === 'folder') void run('Saving folder…', async () => { const p = await exportFolder(view.id); if (p) say(`Saved ${p}`); }); else fail('Save folder: select a folder on the left first.'); break;
       case 'save-all': void run('Saving library…', async () => { const p = await exportLibrary(); if (p) say(`Saved ${p}`); }); break;
-      case 'sync-now': void run('Syncing…', () => syncNow()); break;
+      case 'sync-now': syncToAll(); break;
       case 'settings': setShowSettings(true); break;
       case 'backup-folder': void desktop?.showBackupFolder().catch((e) => fail(errText(e))); break;
       case 'toggle-folders': setLayout({ folders: !layout.folders, focus: false }); break;
@@ -221,10 +221,14 @@ export default function App() {
     );
   };
 
+  const syncLabel = !sync ? '' : sync.phase === 'syncing' ? `⟳ ${sync.progress != null ? Math.round(sync.progress * 100) + '%' : 'Syncing…'}`
+    : sync.phase === 'synced' ? '✓ Sync to Devices' : sync.phase === 'offline' ? '⚡ Offline' : sync.phase === 'error' ? '⚠ Sync to Devices' : 'Sign in to sync';
+  const syncToAll = () => {
+    if (!sync || sync.phase === 'not-set-up' || sync.phase === 'signed-out') { setShowSettings(true); return; }
+    void run('Syncing to devices…', async () => { await syncToDevices(); say('This device now matches your other devices.'); });
+  };
   const syncBadge = sync ? (
-    <button className={`sync ${sync.phase}`} title={sync.message} onClick={() => setShowSettings(true)}>
-      {sync.phase === 'synced' ? '✓ Synced' : sync.phase === 'syncing' ? `⟳ ${sync.progress != null ? Math.round(sync.progress * 100) + '%' : 'Syncing'}` : sync.phase === 'offline' ? '⚡ Offline' : sync.phase === 'error' ? '⚠ Sync problem' : sync.phase === 'signed-out' ? 'Sign in to sync' : 'Set up sync'}
-    </button>
+    <button className={`sync ${sync.phase}`} title={`${sync.message}\nClick: make this device match your other devices.`} onClick={syncToAll} disabled={sync.phase === 'syncing'}>{syncLabel}</button>
   ) : null;
 
   const viewTitle = view.type === 'all' ? 'All notes' : view.type === 'trash' ? 'Trash' : view.type === 'tag' ? `#${view.tag}` : store.folderPath(view.id);

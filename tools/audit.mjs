@@ -87,6 +87,13 @@ for (const m of iface.matchAll(/^\s+(\w+)\(/gm)) check(bridgeMethods.has(m[1]), 
 // window.prompt does not exist in the desktop app (Electron) — 1.0.1 shipped New Folder/Rename/Link broken on PC
 for (const f of files.filter((f) => f.startsWith('src/') && /\.(ts|tsx)$/.test(f))) check(!/window\.prompt\(|[^.\w]prompt\(/.test(r(f).replace(/askText|PromptHost/g, '')), `${f}: uses prompt(), which silently does nothing in the desktop app — use askText()`);
 
+// 1.0.3: Tab/Shift+Tab indent must be registered and must not steal Tab from tables
+check(/\bIndent,/.test(r('src/components/Editor.tsx')) && /Tab:/.test(r('src/components/Indent.ts')) && /'Shift-Tab':/.test(r('src/components/Indent.ts')), 'Tab/Shift+Tab indent extension not registered in the editor');
+check((r('src/components/Indent.ts').match(/isActive\('table'\)\) return false/g) ?? []).length === 2, 'Indent must leave Tab/Shift+Tab to tables');
+// toolbar must wrap (never hide buttons behind sideways scrolling)
+check(!/\.toolbar[^{]*\{[^}]*(flex-wrap:\s*nowrap|overflow-x:\s*auto)/.test(r('src/styles.css')), 'toolbar must wrap onto more rows, not scroll sideways');
+check(/syncToDevices/.test(r('src/App.tsx')) && /export async function syncToDevices/.test(r('src/lib/sync.ts')), 'Sync to Devices button not wired');
+
 // 9. Every relative import in src resolves
 for (const f of files.filter((f) => f.startsWith('src/') && /\.(ts|tsx)$/.test(f))) {
   for (const m of r(f).matchAll(/from\s+'(\.[^']+)'/g)) {

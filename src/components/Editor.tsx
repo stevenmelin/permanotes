@@ -8,6 +8,7 @@ import Highlight from '@tiptap/extension-highlight';
 import Image from '@tiptap/extension-image';
 import { Placeholder } from '@tiptap/extensions';
 import { AttachmentNode } from './AttachmentNode';
+import { Indent } from './Indent';
 import { askText } from './Prompt';
 import { rememberUrl, resolveHtml, unresolveHtml } from '../lib/attachments';
 import { addAttachment, updateNote } from '../lib/store';
@@ -39,6 +40,7 @@ export const editorExtensions = [
   TaskItem.configure({ nested: true }),
   Image.configure({ allowBase64: false }),
   AttachmentNode,
+  Indent,
   Placeholder.configure({ placeholder: 'Start writing…' }),
 ];
 

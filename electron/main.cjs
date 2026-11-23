@@ -114,7 +114,7 @@ function buildMenu() {
         { label: 'Save Folder as .pn…', click: send('save-folder') },
         { label: 'Save All Notes as .pn…', accelerator: 'CmdOrCtrl+Shift+S', click: send('save-all') },
         { type: 'separator' },
-        { label: 'Sync Now', accelerator: 'F5', click: send('sync-now') },
+        { label: 'Sync to Devices', accelerator: 'F5', click: send('sync-now') },
         { label: 'Sync && Settings…', accelerator: 'CmdOrCtrl+,', click: send('settings') },
         { label: 'Show Backup Folder', click: send('backup-folder') },
         { type: 'separator' },

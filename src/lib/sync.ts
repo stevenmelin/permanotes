@@ -112,7 +112,19 @@ if (typeof window !== 'undefined') {
   setInterval(() => { if (client) void syncNow(); }, 60_000);
 }
 
-export async function syncNow(): Promise<void> {
+// "Sync to Devices": make this device match the others. Everything is downloaded again and the
+// server copy wins; edits on this device that never reached the server are kept as "(this device)" copies.
+export async function syncToDevices(): Promise<void> {
+  if (!client) throw new Error('Sync is off on this device. Open Settings and turn sync on.');
+  const { data } = await client.auth.getSession();
+  if (!data.session) throw new Error('Sign in first: tap the gear, then Sign in with your email and password.');
+  for (let i = 0; running && i < 120; i++) await new Promise((r) => setTimeout(r, 250));
+  if (running) throw new Error('A sync is still running. Try again in a moment.');
+  await syncNow(true);
+  if (status.phase === 'error' || status.phase === 'offline') throw new Error(status.message);
+}
+
+export async function syncNow(full = false): Promise<void> {
   if (!client) return;
   if (running) { again = true; return; }
   const { data } = await client.auth.getSession();
@@ -121,8 +133,8 @@ export async function syncNow(): Promise<void> {
   running = true;
   const problems: string[] = [];
   try {
-    setStatus({ phase: 'syncing', message: 'Syncing…', progress: null });
-    await pull(data.session.user.id);
+    setStatus({ phase: 'syncing', message: full ? 'Matching your other devices…' : 'Syncing…', progress: null });
+    await pull(data.session.user.id, full);
     await push(data.session.user.id, problems);
     setStatus({
       phase: problems.length ? 'error' : 'synced',
@@ -157,8 +169,8 @@ async function fetchSince(table: Table, since: string | null): Promise<Row[]> {
   return out;
 }
 
-async function pull(_userId: string) {
-  const since = (await db.kvGet<string | null>('lastPull')) ?? null;
+async function pull(_userId: string, full = false) {
+  const since = full ? null : (await db.kvGet<string | null>('lastPull')) ?? null;
   let maxSeen = since;
   // Re-read the last 2 minutes each time so a row committed slightly late is never missed (re-applying is harmless).
   const query = since ? new Date(Date.parse(since.replace(/(\.\d{3})\d+/, '$1')) - 120_000).toISOString() : null;
@@ -169,7 +181,7 @@ async function pull(_userId: string) {
   for (const r of rf) {
     track(r);
     const l = state.folders.get(r.id);
-    if (l?.dirty && l.updated_at > r.updated_at) continue; // local is newer; push will win
+    if (!full && l?.dirty && l.updated_at > r.updated_at) continue; // local is newer; push will win
     folders.push({ id: r.id, parent_id: (r.parent_id as string) ?? null, name: r.name as string, sort: (r.sort as number) ?? 0, updated_at: r.updated_at, deleted: !!r.deleted, dirty: false, synced_at: r.updated_at });
   }
   await saveLocal('folders', folders, true);
@@ -179,7 +191,7 @@ async function pull(_userId: string) {
   for (const r of ra) {
     track(r);
     const l = state.attachments.get(r.id);
-    if (l?.dirty && l.updated_at > r.updated_at) continue;
+    if (!full && l?.dirty && l.updated_at > r.updated_at) continue;
     atts.push({ id: r.id, note_id: (r.note_id as string) ?? null, name: r.name as string, mime: r.mime as string, size: Number(r.size ?? 0), created_at: r.created_at as string, updated_at: r.updated_at, deleted: !!r.deleted, dirty: false, synced_at: r.updated_at, has_blob: l?.has_blob ?? false });
   }
   await saveLocal('attachments', atts, true);
@@ -191,6 +203,13 @@ async function pull(_userId: string) {
     track(r);
     const remote: Note = { id: r.id, folder_id: (r.folder_id as string) ?? null, title: (r.title as string) ?? '', html: (r.html as string) ?? '', tags: (r.tags as string[]) ?? [], sort: Number(r.sort ?? 0), pinned: r.pinned == null ? null : Number(r.pinned), created_at: r.created_at as string, updated_at: r.updated_at, deleted: !!r.deleted, dirty: false, synced_at: r.updated_at };
     const l = state.notes.get(r.id);
+    if (full) {
+      if (l?.dirty && !l.deleted && (l.html !== remote.html || l.title !== remote.title)) {
+        copies.push({ ...l, id: uid(), title: `${l.title || 'Untitled'} (this device)`, dirty: true, synced_at: null });
+      }
+      notes.push(remote);
+      continue;
+    }
     if (l?.dirty && l.updated_at !== r.updated_at) {
       if (r.updated_at === l.synced_at) continue; // server still has the version we started from; our edit wins on push
       // Both sides changed since the last sync: keep both. The local edit becomes a copy.
@@ -205,6 +224,7 @@ async function pull(_userId: string) {
   await saveLocal('notes', notes, true);
   if (copies.length) await saveLocal('notes', copies);
   if (maxSeen !== since) await db.kvSet('lastPull', maxSeen);
+  if (full) setStatus({ message: `Matched your other devices: ${rn.length} notes, ${rf.length} folders.${copies.length ? ` ${copies.length} unsynced edit(s) from this device kept as "(this device)" copies.` : ''}` });
 }
 
 // ---------- push ----------
