@@ -142,7 +142,11 @@ check(ps.includes('hierarchy.xml') && r('src/lib/onenoteImport.ts').includes('hi
 const wf = r('.github/workflows/build.yml');
 for (const m of wf.matchAll(/"((?:mac|windows)\/[^"]+\.(?:command|bat))"/g)) check(existsSync(join(ROOT, m[1])), `workflow references missing ${m[1]}`);
 
-// 15. Versions agree
+// Account-wide artifact quota blocked builds once: deliver via Releases/gh-pages, never Actions artifacts
+check(!/upload-artifact|upload-pages-artifact/.test(wf), 'workflow must not use Actions artifacts (account storage quota) - upload to the release instead');
+check(/gh release upload[^\n]*Windows-Setup\.exe/.test(wf) && /gh release upload[^\n]*Mac\.dmg/.test(wf), 'workflow must attach both installers to the release');
+
+// 15. Electron origin
 check(r('electron/main.cjs').includes("loadURL('app://permanotes/index.html')"), 'electron must load the app:// URL (IndexedDB needs a stable origin)');
 
 const rel = relative(process.cwd(), ROOT) || '.';

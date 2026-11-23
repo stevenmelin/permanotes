@@ -1,5 +1,8 @@
 name: Build PermaNotes
 
+# Installers go straight onto a GitHub Release (no Actions artifact storage used).
+# iPhone web app is published to the gh-pages branch -> https://stevenmelin.github.io/permanotes/
+
 on:
   push:
     branches: [main]
@@ -7,16 +10,20 @@ on:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  GH_TOKEN: ${{ github.token }}
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - name: Static audit (no dependencies)
@@ -28,20 +35,25 @@ jobs:
       - run: npm test
       - name: Build iPhone web app
         run: npm run build:web
-      - uses: actions/upload-pages-artifact@v3
-        with: { path: dist }
-
-  pages:
-    needs: check
-    runs-on: ubuntu-latest
-    # Needs a one-time switch: repo Settings > Pages > Source = "GitHub Actions". Installers still build without it.
-    continue-on-error: true
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
-      - id: deploy
-        uses: actions/deploy-pages@v4
+      - name: Publish iPhone web app (gh-pages branch)
+        run: |
+          cd dist
+          touch .nojekyll
+          git init -q
+          git checkout -q -b gh-pages
+          git add -A
+          git -c user.name="github-actions" -c user.email="github-actions@users.noreply.github.com" commit -qm "Web app ${GITHUB_SHA}"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
+      - id: tag
+        run: |
+          V=$(node -p "require('./package.json').version")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "tag=v$V-build${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+      - name: Create draft release
+        run: |
+          gh release create "${{ steps.tag.outputs.tag }}" --draft --target "$GITHUB_SHA" \
+            --title "PermaNotes ${{ steps.tag.outputs.version }} (build ${GITHUB_RUN_NUMBER})" \
+            --notes "Windows: download the Setup .exe. Mac: download the .dmg. iPhone: open https://stevenmelin.github.io/permanotes/ in Safari and Add to Home Screen. See the START HERE files in the Source zip."
 
   windows:
     needs: check
@@ -60,11 +72,9 @@ jobs:
       - name: Build installer (windows\Build Windows Installer.bat)
         shell: cmd
         run: call "windows\Build Windows Installer.bat"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows
-          path: release/*-Windows-Setup.exe
-          if-no-files-found: error
+      - name: Attach installer to release
+        shell: bash
+        run: gh release upload "${{ needs.check.outputs.tag }}" release/*-Windows-Setup.exe --clobber
 
   mac:
     needs: check
@@ -77,27 +87,17 @@ jobs:
         run: '"mac/Build Mac App.command"'
       - name: Build DMG (mac/Build Mac DMG.command)
         run: '"mac/Build Mac DMG.command"'
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mac
-          path: release/*-Mac.dmg
-          if-no-files-found: error
+      - name: Attach DMG to release
+        run: gh release upload "${{ needs.check.outputs.tag }}" release/*-Mac.dmg --clobber
 
-  release:
-    needs: [windows, mac]
+  publish:
+    needs: [check, windows, mac]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with: { path: out }
-      - name: Publish release
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Attach source zip and publish
         run: |
-          VERSION=$(node -p "require('./package.json').version")
-          TAG="v${VERSION}-build${{ github.run_number }}"
-          git archive --format=zip --prefix=permanotes/ -o "out/PermaNotes-${VERSION}-Source.zip" HEAD
-          gh release create "$TAG" out/windows/* out/mac/* "out/PermaNotes-${VERSION}-Source.zip" \
-            --title "PermaNotes ${VERSION} (build ${{ github.run_number }})" \
-            --notes "Windows: download the Setup .exe. Mac: download the .dmg. iPhone: https://stevenmelin.github.io/permanotes/ (see START HERE - iPhone.txt)." \
-            --latest
+          Z="PermaNotes-${{ needs.check.outputs.version }}-Source.zip"
+          git archive --format=zip --prefix=permanotes/ -o "$Z" HEAD
+          gh release upload "${{ needs.check.outputs.tag }}" "$Z" --clobber
+          gh release edit "${{ needs.check.outputs.tag }}" --draft=false --latest
