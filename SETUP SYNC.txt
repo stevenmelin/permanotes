@@ -1,0 +1,34 @@
+SET UP SYNC (one time, about 10 minutes)
+========================================
+PermaNotes syncs through Supabase, a free online database you own.
+
+A. CREATE THE DATABASE (on your computer, in a web browser)
+1. Go to https://supabase.com and click "Start your project". Sign up (free).
+2. Click "New project". Name it "PermaNotes", make up a database password
+   (save it somewhere - you won't need it in PermaNotes), pick the region
+   closest to you (East US), and click "Create new project". Wait ~2 minutes.
+3. In the left menu click "SQL Editor", then "New query".
+4. Open the file "supabase/schema.sql" (from this project) in Notepad or TextEdit,
+   copy ALL of it, paste it into Supabase, and click "Run".
+   It should say "Success. No rows returned".
+5. In the left menu click "Authentication", then "Sign In / Providers", then "Email".
+   Turn OFF "Confirm email" and click Save. (Only you will use this database.)
+6. In the left menu click "Project Settings", then "API" (or "API Keys").
+   Keep this page open - you need two things from it:
+     - Project URL           (looks like https://abcdefgh.supabase.co)
+     - anon public key       (a long code starting with eyJ...)
+       or "publishable" key  (starts with sb_publishable_)
+
+B. CONNECT EACH DEVICE (PC, Mac, iPhone)
+1. Open PermaNotes and click the gear (Settings).
+2. Paste the Project URL and the key. Click "Save connection".
+3. First device only: type your email and a password, click "Create account".
+   Every other device: same email and password, click "Sign in".
+4. The badge at the top changes to "Synced".
+
+Good to know
+- Supabase's free plan includes 500 MB of notes and 1 GB of images/attachments.
+  Each single attachment can be up to 50 MB.
+- Free Supabase projects pause after a week with no use at all. If sync stops,
+  log in at supabase.com and click "Restore project". Your notes are never lost:
+  every device keeps a full copy, and PC/Mac also make a daily .pn backup.

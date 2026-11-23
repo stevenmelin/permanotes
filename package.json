@@ -1,0 +1,79 @@
+{
+  "name": "permanotes",
+  "productName": "PermaNotes",
+  "version": "1.0.0",
+  "description": "Notes that sync between Windows, Mac and iPhone.",
+  "author": "Steven Melin",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:web": "vite build --base=/permanotes/",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "audit": "node tools/audit.mjs",
+    "electron": "electron ."
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.119.2",
+    "@tiptap/core": "^3.35.0",
+    "@tiptap/extension-image": "^3.35.0",
+    "@tiptap/extension-list": "^3.35.0",
+    "@tiptap/extension-table": "^3.35.0",
+    "@tiptap/extensions": "^3.35.0",
+    "@tiptap/pm": "^3.35.0",
+    "@tiptap/react": "^3.35.0",
+    "@tiptap/starter-kit": "^3.35.0",
+    "jszip": "^3.10.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0",
+    "linkedom": "^0.18.15",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.8"
+  },
+  "build": {
+    "appId": "com.stevenmelin.permanotes",
+    "productName": "PermaNotes",
+    "copyright": "Steven Melin",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "build/icon.png",
+      "package.json"
+    ],
+    "fileAssociations": [
+      {
+        "ext": "pn",
+        "name": "PermaNotes File",
+        "description": "PermaNotes note or library",
+        "role": "Editor",
+        "icon": "icon"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.png",
+      "target": "dir",
+      "identity": null,
+      "hardenedRuntime": false
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": "dir"
+    },
+    "npmRebuild": false
+  }
+}

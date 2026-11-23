@@ -1,0 +1,22 @@
+EXPORT YOUR ONENOTE NOTES (Windows PC) - no Microsoft cloud needed
+===================================================================
+
+1. Open OneNote on your PC and make sure all your notebooks show up
+   in the list on the left. Click through each one once so it's loaded.
+   (Any notebook not in that list will NOT be exported.)
+
+2. If any section has a password, click it and unlock it first.
+
+3. Unzip this folder, then double-click "Export My OneNote.bat".
+   - If Windows shows "Windows protected your PC", click
+     "More info" > "Run anyway".
+   - A progress bar shows how far along it is.
+
+4. When it says DONE, look on your Desktop for:
+      OneNote Export.zip
+
+5. Upload "OneNote Export.zip" to Claude.
+   If it's too large to upload, tell Claude the size and you'll get
+   another way to send it.
+
+Nothing in OneNote is changed or deleted. This only reads your notes.

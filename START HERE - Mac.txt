@@ -1,0 +1,23 @@
+PERMANOTES ON MAC - START HERE
+==============================
+
+INSTALL (the easy way - no building needed)
+1. Go to https://github.com/stevenmelin/permanotes/releases
+2. Under the newest release, click "PermaNotes-x.x.x-Mac.dmg" to download it.
+3. Double-click the DMG, then drag PermaNotes onto the Applications folder.
+4. The first time only: open Applications, then double-click PermaNotes.
+   macOS will say it can't check it (the app isn't signed with a paid Apple certificate).
+   Click "Done", then open System Settings > Privacy & Security, scroll down,
+   and click "Open Anyway" next to PermaNotes. Confirm with your password.
+   After that it opens normally.
+
+FIRST TIME
+- To sync with your PC and iPhone: follow "SETUP SYNC.txt".
+- To open a .pn file: double-click it, or drag it onto PermaNotes.
+
+BUILDING IT YOURSELF (only if you ever want to - GitHub does this for you)
+1. Install Node.js (LTS) from https://nodejs.org
+2. Open the "mac" folder and double-click "Build Mac App.command".
+   (If macOS blocks it: right-click it > Open > Open.)
+3. Then double-click "Build Mac DMG.command".
+4. The DMG appears in the "release" folder.

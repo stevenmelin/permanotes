@@ -1,0 +1,16 @@
+PERMANOTES ON IPHONE - START HERE
+=================================
+
+1. On your iPhone, open Safari and go to:
+      https://stevenmelin.github.io/permanotes/
+2. Tap the Share button (square with an arrow), then "Add to Home Screen", then "Add".
+3. Open PermaNotes from your Home Screen (not from Safari) from now on.
+4. Tap the gear, and enter the same Supabase details and the same email and
+   password you used on your computer (see "SETUP SYNC.txt"). Tap "Sign in".
+   Your notes download automatically.
+
+TIPS
+- It works offline. Changes sync when you're back online.
+- "Save .pn" opens the iPhone share sheet. Pick "Save to Files" to keep the file.
+- To open a .pn file: Import > Open .pn file.
+- If you ever see an old version, close PermaNotes fully (swipe it away) and reopen it.

@@ -1,0 +1,233 @@
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { Editor } from './components/Editor';
+import { Settings } from './components/Settings';
+import { ImportDialog } from './components/ImportDialog';
+import * as store from './lib/store';
+import { exportFolder, exportLibrary, exportNote, importPn } from './lib/pnio';
+import { onStatus, type SyncStatus } from './lib/sync';
+import { desktop } from './lib/platform';
+import type { Folder, Note } from './lib/types';
+import { errText, stripHtml } from './lib/util';
+
+type View = { type: 'all' } | { type: 'folder'; id: string } | { type: 'tag'; tag: string } | { type: 'trash' };
+type Pane = 'nav' | 'list' | 'note';
+
+const textCache = new Map<string, { at: string; text: string }>();
+function noteText(n: Note) {
+  const c = textCache.get(n.id);
+  if (c && c.at === n.updated_at) return c.text;
+  const text = `${n.title} ${n.tags.join(' ')} ${stripHtml(n.html)}`.toLowerCase();
+  textCache.set(n.id, { at: n.updated_at, text });
+  return text;
+}
+
+function loadExpanded(): Set<string> {
+  try { return new Set(JSON.parse(localStorage.getItem('pn.expanded') ?? '[]') as string[]); } catch { return new Set(); }
+}
+
+export default function App() {
+  useSyncExternalStore(store.subscribe, store.getVersion);
+  const [view, setView] = useState<View>({ type: 'all' });
+  const [selected, setSelected] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [sortRecent, setSortRecent] = useState(false);
+  const [pane, setPane] = useState<Pane>('list');
+  const [expanded, setExpanded] = useState<Set<string>>(loadExpanded);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [toast, setToast] = useState<string | null>(null);
+  const [sync, setSync] = useState<SyncStatus | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const fail = (m: string) => setErrors((e) => [...e, m]);
+  const say = (m: string) => { setToast(m); setTimeout(() => setToast((t) => (t === m ? null : t)), 6000); };
+
+  useEffect(() => onStatus(setSync), []);
+  useEffect(() => {
+    const h = (e: Event) => fail(String((e as CustomEvent).detail));
+    window.addEventListener('pn-error', h);
+    return () => window.removeEventListener('pn-error', h);
+  }, []);
+  useEffect(() => { localStorage.setItem('pn.expanded', JSON.stringify([...expanded])); }, [expanded]);
+
+  // .pn files opened from Explorer/Finder or dropped on the window
+  useEffect(() => {
+    const open = async (name: string, bytes: Uint8Array | ArrayBuffer) => {
+      try { setBusy(`Opening ${name}…`); say(await importPn(bytes, null)); } catch (e) { fail(`Opening ${name} failed: ${errText(e)}`); } finally { setBusy(null); }
+    };
+    if (desktop) {
+      void desktop.pendingFiles().then((fs) => fs.forEach((f) => void open(f.name, f.bytes)));
+      desktop.onOpenFile((f) => void open(f.name, f.bytes));
+    }
+    const over = (e: DragEvent) => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault(); };
+    const drop = (e: DragEvent) => {
+      const pn = [...(e.dataTransfer?.files ?? [])].filter((f) => f.name.toLowerCase().endsWith('.pn'));
+      if (!pn.length) return;
+      e.preventDefault();
+      for (const f of pn) void f.arrayBuffer().then((b) => open(f.name, b));
+    };
+    window.addEventListener('dragover', over);
+    window.addEventListener('drop', drop);
+    return () => { window.removeEventListener('dragover', over); window.removeEventListener('drop', drop); };
+  }, []);
+
+  const folders = store.liveFolders();
+  const childrenOf = (pid: string | null) => folders.filter((f) => f.parent_id === pid).sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name));
+
+  const list = useMemo(() => {
+    let ns: Note[];
+    if (view.type === 'trash') ns = [...store.state.notes.values()].filter((n) => n.deleted);
+    else {
+      ns = store.liveNotes();
+      if (view.type === 'folder') { const ids = store.descendantFolderIds(view.id); ns = ns.filter((n) => n.folder_id && ids.includes(n.folder_id)); }
+      if (view.type === 'tag') ns = ns.filter((n) => n.tags.includes(view.tag));
+    }
+    const q = query.trim().toLowerCase();
+    if (q) { const words = q.split(/\s+/); ns = ns.filter((n) => { const t = noteText(n); return words.every((w) => t.includes(w)); }); }
+    if (sortRecent || q || view.type !== 'folder') ns.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    else ns.sort((a, b) => (a.folder_id === b.folder_id ? a.sort - b.sort : store.folderPath(a.folder_id).localeCompare(store.folderPath(b.folder_id))));
+    return ns;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.getVersion(), view, query, sortRecent]);
+
+  const note = selected ? store.state.notes.get(selected) ?? null : null;
+  const currentFolder = view.type === 'folder' ? view.id : null;
+
+  const run = async (label: string, fn: () => Promise<unknown>) => {
+    try { setBusy(label); await fn(); } catch (e) { fail(`${label.replace(/…$/, '')} failed: ${errText(e)}`); } finally { setBusy(null); }
+  };
+
+  const newNote = () => run('Creating note…', async () => {
+    const n = await store.createNote(currentFolder, '', '<p></p>', view.type === 'tag' ? [view.tag] : []);
+    setSelected(n.id); setPane('note');
+  });
+
+  const newFolder = (parent: string | null) => {
+    const name = window.prompt(parent ? 'New subfolder name' : 'New folder name');
+    if (!name?.trim()) return;
+    void run('Creating folder…', async () => {
+      const f = await store.createFolder(name.trim(), parent);
+      if (parent) setExpanded((s) => new Set(s).add(parent));
+      setView({ type: 'folder', id: f.id });
+    });
+  };
+
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const folderActions = (f: Folder) => (
+    <div className="folder-menu" onClick={(e) => e.stopPropagation()}>
+      <button onClick={() => { setMenuFor(null); newFolder(f.id); }}>New subfolder</button>
+      <button onClick={() => { setMenuFor(null); const n = window.prompt('Rename folder', f.name); if (n?.trim()) void run('Renaming…', () => store.updateFolder(f.id, { name: n.trim() })); }}>Rename</button>
+      <button onClick={() => { setMenuFor(null); void run('Saving folder…', async () => { const p = await exportFolder(f.id); if (p) say(`Saved ${p}`); }); }}>Save folder as .pn</button>
+      <button className="danger" onClick={() => { setMenuFor(null); if (window.confirm(`Delete "${f.name}" and move all its notes to Trash?`)) void run('Deleting…', async () => { await store.deleteFolder(f.id); setView({ type: 'all' }); }); }}>Delete folder</button>
+    </div>
+  );
+
+  const renderFolder = (f: Folder, depth: number) => {
+    const kids = childrenOf(f.id);
+    const open = expanded.has(f.id);
+    const active = view.type === 'folder' && view.id === f.id;
+    return (
+      <div key={f.id}>
+        <div className={active ? 'nav-item active' : 'nav-item'} style={{ paddingLeft: 8 + depth * 14 }}
+          onClick={() => { setView({ type: 'folder', id: f.id }); setPane('list'); }}>
+          <span className="twisty" onClick={(e) => { e.stopPropagation(); setExpanded((s) => { const n = new Set(s); if (n.has(f.id)) n.delete(f.id); else n.add(f.id); return n; }); }}>
+            {kids.length ? (open ? '▾' : '▸') : ''}
+          </span>
+          <span className="nav-label">📁 {f.name}</span>
+          <button className="mini" title="Folder options" onClick={(e) => { e.stopPropagation(); setMenuFor(menuFor === f.id ? null : f.id); }}>⋯</button>
+        </div>
+        {menuFor === f.id && folderActions(f)}
+        {open && kids.map((k) => renderFolder(k, depth + 1))}
+      </div>
+    );
+  };
+
+  const syncBadge = sync ? (
+    <button className={`sync ${sync.phase}`} title={sync.message} onClick={() => setShowSettings(true)}>
+      {sync.phase === 'synced' ? '✓ Synced' : sync.phase === 'syncing' ? `⟳ ${sync.progress != null ? Math.round(sync.progress * 100) + '%' : 'Syncing'}` : sync.phase === 'offline' ? '⚡ Offline' : sync.phase === 'error' ? '⚠ Sync problem' : sync.phase === 'signed-out' ? 'Sign in to sync' : 'Set up sync'}
+    </button>
+  ) : null;
+
+  const viewTitle = view.type === 'all' ? 'All notes' : view.type === 'trash' ? 'Trash' : view.type === 'tag' ? `#${view.tag}` : store.folderPath(view.id);
+
+  return (
+    <div className={`app pane-${pane}`}>
+      <header>
+        <button className="only-mobile" onClick={() => setPane(pane === 'note' ? 'list' : 'nav')}>{pane === 'note' ? '‹ Notes' : '☰'}</button>
+        <strong className="brand">PermaNotes</strong>
+        <span className="spacer" />
+        {syncBadge}
+        <button onClick={() => setShowImport(true)}>Import</button>
+        <button onClick={() => void run('Saving library…', async () => { const p = await exportLibrary(); if (p) say(`Saved ${p}`); })}>Save all .pn</button>
+        <button onClick={() => setShowSettings(true)}>⚙</button>
+      </header>
+      {errors.length > 0 && (
+        <div className="errors">
+          {errors.map((e, i) => <pre key={i}>{e}</pre>)}
+          <button onClick={() => setErrors([])}>Dismiss</button>
+        </div>
+      )}
+      {busy && <div className="busy"><div className="bar indeterminate" /> {busy}</div>}
+      {toast && <div className="toast" onClick={() => setToast(null)}>{toast}</div>}
+      <main>
+        <nav className="sidebar">
+          <div className={view.type === 'all' ? 'nav-item active' : 'nav-item'} onClick={() => { setView({ type: 'all' }); setPane('list'); }}>🗂 All notes <span className="count">{store.liveNotes().length}</span></div>
+          <div className="nav-head">Folders <button className="mini" title="New folder" onClick={() => newFolder(null)}>＋</button></div>
+          {childrenOf(null).map((f) => renderFolder(f, 0))}
+          {folders.length === 0 && <div className="hint">No folders yet. Click ＋ or import your OneNote notes.</div>}
+          <div className="nav-head">Tags</div>
+          {store.allTags().map((t) => (
+            <div key={t} className={view.type === 'tag' && view.tag === t ? 'nav-item active' : 'nav-item'} onClick={() => { setView({ type: 'tag', tag: t }); setPane('list'); }}># {t}</div>
+          ))}
+          <div className="nav-head" />
+          <div className={view.type === 'trash' ? 'nav-item active' : 'nav-item'} onClick={() => { setView({ type: 'trash' }); setPane('list'); }}>🗑 Trash</div>
+        </nav>
+        <section className="list">
+          <div className="list-head">
+            <div className="list-title">{viewTitle}</div>
+            <input type="search" placeholder="Search…" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <div className="list-actions">
+              {view.type !== 'trash' && <button onClick={newNote}>＋ New note</button>}
+              {view.type === 'folder' && <label className="chk"><input type="checkbox" checked={sortRecent} onChange={(e) => setSortRecent(e.target.checked)} /> Newest first</label>}
+            </div>
+          </div>
+          <div className="list-items">
+            {list.map((n) => (
+              <div key={n.id} className={n.id === selected ? 'note-item active' : 'note-item'} onClick={() => { setSelected(n.id); setPane('note'); }}>
+                <div className="note-title">{n.title || 'Untitled'}</div>
+                <div className="note-snippet">{noteText(n).slice(n.title.length + n.tags.join(' ').length + 2, n.title.length + 120)}</div>
+                <div className="note-meta">{new Date(n.updated_at).toLocaleDateString()}{view.type !== 'folder' && n.folder_id ? ` · ${store.folderPath(n.folder_id)}` : ''}</div>
+              </div>
+            ))}
+            {list.length === 0 && <div className="hint">{query ? 'No matches.' : 'No notes here yet.'}</div>}
+          </div>
+        </section>
+        <section className="note">
+          {note && !note.deleted && (
+            <>
+              <div className="note-bar">
+                <select value={note.folder_id ?? ''} onChange={(e) => void run('Moving…', () => store.updateNote(note.id, { folder_id: e.target.value || null }))}>
+                  <option value="">(No folder)</option>
+                  {folders.map((f) => ({ f, p: store.folderPath(f.id) })).sort((a, b) => a.p.localeCompare(b.p)).map(({ f, p }) => <option key={f.id} value={f.id}>{p}</option>)}
+                </select>
+                <span className="spacer" />
+                <button onClick={() => { if (window.confirm('Move this note to Trash?')) void run('Deleting…', async () => { await store.updateNote(note.id, { deleted: true }); setSelected(null); setPane('list'); }); }}>Delete</button>
+              </div>
+              <Editor note={note} onError={fail} onExport={() => void run('Saving note…', async () => { const p = await exportNote(note.id); if (p) say(`Saved ${p}`); })} />
+            </>
+          )}
+          {note && note.deleted && (
+            <div className="empty">
+              <p>“{note.title || 'Untitled'}” is in the Trash.</p>
+              <button onClick={() => void run('Restoring…', () => store.updateNote(note.id, { deleted: false }))}>Restore note</button>
+            </div>
+          )}
+          {!note && <div className="empty"><p>Select a note, or create a new one.</p></div>}
+        </section>
+      </main>
+      {showSettings && <Settings onClose={() => setShowSettings(false)} onError={fail} />}
+      {showImport && <ImportDialog onClose={() => setShowImport(false)} onError={fail} onDone={(m) => say(m)} targetFolder={currentFolder} />}
+    </div>
+  );
+}

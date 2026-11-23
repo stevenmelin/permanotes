@@ -1,0 +1,120 @@
+import * as db from './db';
+import type { AttachmentMeta, Folder, Note } from './types';
+import { now, uid } from './util';
+
+// In-memory mirror of the local database. Every change is written to IndexedDB first, then
+// marked dirty so the sync engine pushes it.
+
+export const state = {
+  folders: new Map<string, Folder>(),
+  notes: new Map<string, Note>(),
+  attachments: new Map<string, AttachmentMeta>(),
+  loaded: false,
+};
+
+type Listener = () => void;
+const listeners = new Set<Listener>();
+let version = 0;
+export const subscribe = (l: Listener) => { listeners.add(l); return () => { listeners.delete(l); }; };
+export const getVersion = () => version;
+let changeHook: () => void = () => {};
+export const onLocalChange = (fn: () => void) => { changeHook = fn; };
+
+export function emit() {
+  version++;
+  for (const l of listeners) l();
+}
+
+export async function load() {
+  const [f, n, a] = await Promise.all([
+    db.getAll<Folder>('folders'), db.getAll<Note>('notes'), db.getAll<AttachmentMeta>('attachments'),
+  ]);
+  state.folders = new Map(f.map((x) => [x.id, x]));
+  state.notes = new Map(n.map((x) => [x.id, x]));
+  state.attachments = new Map(a.map((x) => [x.id, x]));
+  state.loaded = true;
+  emit();
+}
+
+async function saveLocal(kind: 'folders', items: Folder[], fromSync?: boolean): Promise<void>;
+async function saveLocal(kind: 'notes', items: Note[], fromSync?: boolean): Promise<void>;
+async function saveLocal(kind: 'attachments', items: AttachmentMeta[], fromSync?: boolean): Promise<void>;
+async function saveLocal(kind: 'folders' | 'notes' | 'attachments', items: (Folder | Note | AttachmentMeta)[], fromSync = false) {
+  await db.putMany(kind, items);
+  const map = state[kind] as Map<string, Folder | Note | AttachmentMeta>;
+  for (const it of items) map.set(it.id, it);
+  emit();
+  if (!fromSync) changeHook();
+}
+export { saveLocal };
+
+// ---------- folders ----------
+export async function createFolder(name: string, parent_id: string | null): Promise<Folder> {
+  const siblings = [...state.folders.values()].filter((f) => !f.deleted && f.parent_id === parent_id);
+  const f: Folder = { id: uid(), parent_id, name, sort: siblings.length, updated_at: now(), deleted: false, dirty: true, synced_at: null };
+  await saveLocal('folders', [f]);
+  return f;
+}
+
+export async function updateFolder(id: string, patch: Partial<Folder>) {
+  const f = state.folders.get(id);
+  if (!f) throw new Error(`Folder ${id} not found`);
+  await saveLocal('folders', [{ ...f, ...patch, updated_at: now(), dirty: true }]);
+}
+
+export function descendantFolderIds(id: string): string[] {
+  const out = [id];
+  for (let i = 0; i < out.length; i++) {
+    for (const f of state.folders.values()) if (f.parent_id === out[i] && !f.deleted) out.push(f.id);
+  }
+  return out;
+}
+
+export async function deleteFolder(id: string) {
+  const ids = descendantFolderIds(id);
+  const t = now();
+  const folders = ids.map((fid) => ({ ...state.folders.get(fid)!, deleted: true, updated_at: t, dirty: true }));
+  const notes = [...state.notes.values()].filter((n) => n.folder_id && ids.includes(n.folder_id) && !n.deleted)
+    .map((n) => ({ ...n, deleted: true, updated_at: t, dirty: true }));
+  await saveLocal('notes', notes);
+  await saveLocal('folders', folders);
+}
+
+// ---------- notes ----------
+export async function createNote(folder_id: string | null, title = '', html = '<p></p>', tags: string[] = []): Promise<Note> {
+  const t = now();
+  const sort = [...state.notes.values()].filter((n) => n.folder_id === folder_id && !n.deleted).length;
+  const n: Note = { id: uid(), folder_id, title, html, tags, sort, created_at: t, updated_at: t, deleted: false, dirty: true, synced_at: null };
+  await saveLocal('notes', [n]);
+  return n;
+}
+
+export async function updateNote(id: string, patch: Partial<Note>) {
+  const n = state.notes.get(id);
+  if (!n) throw new Error(`Note ${id} not found`);
+  await saveLocal('notes', [{ ...n, ...patch, updated_at: now(), dirty: true }]);
+}
+
+// ---------- attachments ----------
+export async function addAttachment(blob: Blob, name: string, mime: string, note_id: string | null, id = uid()): Promise<AttachmentMeta> {
+  await db.putBlob(id, blob);
+  const t = now();
+  const a: AttachmentMeta = { id, note_id, name, mime, size: blob.size, created_at: t, updated_at: t, deleted: false, dirty: true, synced_at: null, has_blob: true };
+  await saveLocal('attachments', [a]);
+  return a;
+}
+
+export function liveFolders() { return [...state.folders.values()].filter((f) => !f.deleted); }
+export function liveNotes() { return [...state.notes.values()].filter((n) => !n.deleted); }
+export function allTags(): string[] {
+  const s = new Set<string>();
+  for (const n of liveNotes()) for (const t of n.tags) s.add(t);
+  return [...s].sort((a, b) => a.localeCompare(b));
+}
+export function folderPath(id: string | null): string {
+  const parts: string[] = [];
+  let cur = id ? state.folders.get(id) : undefined;
+  let guard = 0;
+  while (cur && guard++ < 50) { parts.unshift(cur.name); cur = cur.parent_id ? state.folders.get(cur.parent_id) : undefined; }
+  return parts.join(' / ');
+}

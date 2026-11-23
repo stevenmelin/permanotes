@@ -1,0 +1,101 @@
+name: Build PermaNotes
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Static audit (no dependencies)
+        run: node tools/audit.mjs
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Build iPhone web app
+        run: npm run build:web
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: dist }
+
+  pages:
+    needs: check
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+  windows:
+    needs: check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - name: Build app (windows\Build Windows App.bat)
+        shell: cmd
+        run: call "windows\Build Windows App.bat"
+      - name: Build installer (windows\Build Windows Installer.bat)
+        shell: cmd
+        run: call "windows\Build Windows Installer.bat"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: release/*-Windows-Setup.exe
+          if-no-files-found: error
+
+  mac:
+    needs: check
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - name: Build app (mac/Build Mac App.command)
+        run: '"mac/Build Mac App.command"'
+      - name: Build DMG (mac/Build Mac DMG.command)
+        run: '"mac/Build Mac DMG.command"'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: release/*-Mac.dmg
+          if-no-files-found: error
+
+  release:
+    needs: [windows, mac]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: out }
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}-build${{ github.run_number }}"
+          git archive --format=zip --prefix=permanotes/ -o "out/PermaNotes-${VERSION}-Source.zip" HEAD
+          gh release create "$TAG" out/windows/* out/mac/* "out/PermaNotes-${VERSION}-Source.zip" \
+            --title "PermaNotes ${VERSION} (build ${{ github.run_number }})" \
+            --notes "Windows: download the Setup .exe. Mac: download the .dmg. iPhone: https://stevenmelin.github.io/permanotes/ (see START HERE - iPhone.txt)." \
+            --latest
