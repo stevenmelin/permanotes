@@ -8,6 +8,7 @@ import { startSync, onStatus } from './lib/sync';
 import { dailyBackup } from './lib/pnio';
 import { desktop } from './lib/platform';
 import { errText } from './lib/util';
+import { installPinchToTextSize } from './lib/viewprefs';
 
 const root = document.getElementById('root')!;
 
@@ -22,6 +23,7 @@ function showFatal(e: unknown) {
 window.addEventListener('unhandledrejection', (ev) => { console.error('Unhandled:', ev.reason); });
 
 async function boot() {
+  installPinchToTextSize();
   await requestPersistence();
   await load();
   createRoot(root).render(<StrictMode><App /></StrictMode>);

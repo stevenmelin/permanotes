@@ -100,6 +100,15 @@ check(/before-quit[\s\S]*app\.exit\(0\)/.test(main), 'missing forced-exit safety
 check(/CloseApplications=no/.test(iss) && /function PrepareToInstall[\s\S]*CloseRunningPermaNotes/.test(iss) && /taskkill\.exe'\), '\/F \/IM PermaNotes\.exe/.test(iss), 'installer must close a running PermaNotes itself (no "applications are using files" page)');
 check(/function InitializeUninstall[\s\S]*CloseRunningPermaNotes/.test(iss), 'uninstaller must close a running PermaNotes');
 
+// 1.0.5: toolbar state (B on/off, font size box) must follow the cursor
+check(/shouldRerenderOnTransaction: true/.test(r('src/components/Editor.tsx')), 'editor must re-render on transactions or toolbar states go stale');
+check(/setFontSize/.test(r('src/components/Editor.tsx')) && /title="Font size"/.test(r('src/components/Editor.tsx')), 'font size control missing from toolbar');
+
+// per-device note text size: zoom only the note (not menus), stored locally, iPhone pinch hooked up
+check(/className="note-zoom" style=\{\{ zoom: noteZoom \}\}/.test(r('src/components/Editor.tsx')), 'note text size must zoom the note area only');
+check(/gesturechange/.test(r('src/lib/viewprefs.ts')) && /installPinchToTextSize\(\)/.test(r('src/main.tsx')), 'iPhone pinch-to-text-size not installed');
+check(!/noteZoom/.test(r('src/lib/sync.ts')) && /localStorage/.test(r('src/lib/viewprefs.ts')), 'note text size must stay on this device (never synced)');
+
 // 9. Every relative import in src resolves
 for (const f of files.filter((f) => f.startsWith('src/') && /\.(ts|tsx)$/.test(f))) {
   for (const m of r(f).matchAll(/from\s+'(\.[^']+)'/g)) {

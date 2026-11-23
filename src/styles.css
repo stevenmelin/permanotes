@@ -153,3 +153,5 @@ ul[data-type="taskList"] li[data-checked="true"] > div { color: var(--muted); te
   .app.narrow .content .ProseMirror { font-size: 16px; }
 }
 .modal.prompt { width: min(420px, 94vw); }
+.zoom-row { align-items: center; }
+.zoom-row b { min-width: 48px; text-align: center; }

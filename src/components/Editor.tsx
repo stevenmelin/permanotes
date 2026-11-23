@@ -10,6 +10,7 @@ import { Placeholder } from '@tiptap/extensions';
 import { AttachmentNode } from './AttachmentNode';
 import { Indent } from './Indent';
 import { askText } from './Prompt';
+import { getNoteZoom, onNoteZoom } from '../lib/viewprefs';
 import { rememberUrl, resolveHtml, unresolveHtml } from '../lib/attachments';
 import { addAttachment, updateNote } from '../lib/store';
 import type { Note } from '../lib/types';
@@ -44,6 +45,21 @@ export const editorExtensions = [
   Placeholder.configure({ placeholder: 'Start writing…' }),
 ];
 
+const SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72];
+const FONTS = ['Arial', 'Aptos', 'Segoe UI', 'Verdana', 'Georgia', 'Times New Roman', 'Courier New', 'Comic Sans MS'];
+// "20pt" -> "20", "16px" -> "12", nothing -> "11" (the default)
+function sizeValue(fs?: string): string {
+  if (!fs) return '11';
+  const n = parseFloat(fs);
+  if (Number.isNaN(n)) return '11';
+  return String(Math.round((fs.endsWith('px') ? n * 0.75 : n) * 2) / 2);
+}
+function fontFamilyValue(ff?: string): string {
+  if (!ff) return 'default';
+  const first = ff.split(',')[0].replace(/['"]/g, '').trim();
+  return /^calibri$/i.test(first) ? 'default' : first;
+}
+
 const TEXT_COLORS: [string, string][] = [['Automatic', 'none'], ['Red', '#FA0000'], ['Orange', '#E36C0A'], ['Green', '#00A933'], ['Blue', '#0070C0'], ['Purple', '#7030A0'], ['Gray', '#747474']];
 const HIGHLIGHTS: [string, string][] = [['No highlight', 'none'], ['Yellow', 'yellow'], ['Green', 'lime'], ['Turquoise', 'aqua'], ['Pink', 'magenta'], ['Orange', 'orange']];
 
@@ -65,6 +81,8 @@ export function Editor({ note, onError, onExport, showToolbar, textWidth, onText
   const [title, setTitle] = useState(note.title);
   const [tags, setTags] = useState(note.tags.join(', '));
   const [loadIssues, setLoadIssues] = useState<string[]>([]);
+  const [noteZoom, setNoteZoomState] = useState(getNoteZoom);
+  useEffect(() => onNoteZoom(setNoteZoomState), []);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastHtml = useRef<string>(note.html);
   const noteId = useRef(note.id);
@@ -72,6 +90,7 @@ export function Editor({ note, onError, onExport, showToolbar, textWidth, onText
 
   const editor = useEditor({
     extensions: editorExtensions,
+    shouldRerenderOnTransaction: true, // keep toolbar (bold/size/list buttons) in step with the cursor
     content: '',
     editorProps: {
       handlePaste: (_v, ev) => {
@@ -174,6 +193,19 @@ export function Editor({ note, onError, onExport, showToolbar, textWidth, onText
             <option value="1">1, 2, 3</option><option value="a">a, b, c</option><option value="i">i, ii, iii</option><option value="A">A, B, C</option><option value="I">I, II, III</option>
           </select>
         )}
+        <select className="tbsel" title="Font" value={fontFamilyValue(editor.getAttributes('textStyle').fontFamily as string | undefined)}
+          onChange={(e) => { const v = e.target.value; if (v === 'default') c().unsetFontFamily().run(); else c().setFontFamily(v).run(); }}>
+          <option value="default">Calibri</option>
+          {FONTS.map((f) => <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>)}
+          {!['default', ...FONTS].includes(fontFamilyValue(editor.getAttributes('textStyle').fontFamily as string | undefined)) && <option value={fontFamilyValue(editor.getAttributes('textStyle').fontFamily as string | undefined)}>{fontFamilyValue(editor.getAttributes('textStyle').fontFamily as string | undefined)}</option>}
+        </select>
+        <select className="tbsel size" title="Font size" value={sizeValue(editor.getAttributes('textStyle').fontSize as string | undefined)}
+          onChange={(e) => { const v = e.target.value; if (v === '11') c().unsetFontSize().run(); else c().setFontSize(`${v}pt`).run(); }}>
+          {SIZES.map((n) => <option key={n} value={String(n)}>{n}</option>)}
+          {!SIZES.map(String).includes(sizeValue(editor.getAttributes('textStyle').fontSize as string | undefined)) && <option value={sizeValue(editor.getAttributes('textStyle').fontSize as string | undefined)}>{sizeValue(editor.getAttributes('textStyle').fontSize as string | undefined)}</option>}
+        </select>
+        {b('A+', 'Bigger text', () => { const n = Number(sizeValue(editor.getAttributes('textStyle').fontSize as string | undefined)) || 11; const next = SIZES.find((x) => x > n) ?? n; c().setFontSize(`${next}pt`).run(); })}
+        {b('A−', 'Smaller text', () => { const n = Number(sizeValue(editor.getAttributes('textStyle').fontSize as string | undefined)) || 11; const prev = [...SIZES].reverse().find((x) => x < n) ?? n; if (prev === 11) c().unsetFontSize().run(); else c().setFontSize(`${prev}pt`).run(); })}
         <select className="tbsel" title="Text color" value="" onChange={(e) => { const v = e.target.value; if (v === 'none') c().unsetColor().run(); else if (v) c().setColor(v).run(); }}>
           <option value="">A Color</option>
           {TEXT_COLORS.map(([n, v]) => <option key={v} value={v} style={{ color: v === 'none' ? undefined : v }}>{n}</option>)}
@@ -207,7 +239,7 @@ export function Editor({ note, onError, onExport, showToolbar, textWidth, onText
       {loadIssues.length > 0 && <div className="warn">Some attachments couldn't be loaded: {loadIssues.join(' · ')}</div>}
       <div className="content">
         <div className="page" style={textWidth ? { width: textWidth } : undefined}>
-          <EditorContent editor={editor} />
+          <div className="note-zoom" style={{ zoom: noteZoom }}><EditorContent editor={editor} /></div>
           <div className="width-handle" title="Drag to make the text narrower or wider. Double-click to fill the window."
             onDoubleClick={() => onTextWidth(null)}
             onPointerDown={(e) => {

@@ -1,7 +1,7 @@
 {
   "name": "permanotes",
   "productName": "PermaNotes",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Notes that sync between Windows, Mac and iPhone.",
   "author": "Steven Melin",
   "private": true,

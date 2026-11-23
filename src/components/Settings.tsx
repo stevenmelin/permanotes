@@ -3,6 +3,7 @@ import { usingBuiltIn, getStatus, loadSettings, onStatus, saveSettings, signIn, 
 import { APP_VERSION, desktop } from '../lib/platform';
 import { errText, formatBytes } from '../lib/util';
 import { DEFAULT_SYNC } from '../config';
+import { getNoteZoom, onNoteZoom, setNoteZoom } from '../lib/viewprefs';
 
 export function Settings({ onClose, onError }: { onClose: () => void; onError: (m: string) => void }) {
   const cur = loadSettings();
@@ -18,6 +19,8 @@ export function Settings({ onClose, onError }: { onClose: () => void; onError: (
   const [advanced, setAdvanced] = useState(!usingBuiltIn() && !!cur);
 
   useEffect(() => onStatus(setStatus), []);
+  const [zoom, setZoom] = useState(getNoteZoom);
+  useEffect(() => onNoteZoom(setZoom), []);
   useEffect(() => { void storageUsage().then(setUsage); void desktop?.backupFolder().then(setBackupDir); }, []);
 
   const act = async (fn: () => Promise<void>) => {
@@ -29,6 +32,15 @@ export function Settings({ onClose, onError }: { onClose: () => void; onError: (
     <div className="modal-back" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head"><h2>Settings</h2><button onClick={onClose}>Close</button></div>
+
+        <h3>Note text size on this device</h3>
+        <p className="small">Only changes this device — your PC, Mac and iPhone each keep their own. {desktop ? 'Ctrl + mouse wheel zooms the whole app.' : 'Tip: pinch on a note to change it.'}</p>
+        <div className="row zoom-row">
+          <button onClick={() => setNoteZoom(zoom - 0.1)} title="Smaller">A−</button>
+          <b>{Math.round(zoom * 100)}%</b>
+          <button onClick={() => setNoteZoom(zoom + 0.1)} title="Bigger">A+</button>
+          <button onClick={() => setNoteZoom(1)}>Reset</button>
+        </div>
 
         <h3>Sync status</h3>
         <p className={`status ${status.phase}`}>{status.message}</p>
