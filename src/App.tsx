@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Editor } from './components/Editor';
+import { PromptHost, askText } from './components/Prompt';
+import { NoteList, DRAG_TYPE, type SortMode } from './components/NoteList';
 import { Settings } from './components/Settings';
 import { ImportDialog } from './components/ImportDialog';
 import * as store from './lib/store';
@@ -38,7 +40,10 @@ export default function App() {
   const [view, setView] = useState<View>({ type: 'all' });
   const [selected, setSelected] = useState<string | null>(null);
   const [query, setQuery] = useState('');
-  const [sortRecent, setSortRecent] = useState(false);
+  const [sortMode, setSortModeState] = useState<SortMode>(() => (localStorage.getItem('pn.sortMode') as SortMode) || 'custom');
+  const setSortMode = (m: SortMode) => { localStorage.setItem('pn.sortMode', m); setSortModeState(m); };
+  const [selection, setSelection] = useState<Set<string>>(new Set());
+  const [dropFolder, setDropFolder] = useState<string | null>(null);
   const [pane, setPane] = useState<Pane>('list');
   const [expanded, setExpanded] = useState<Set<string>>(loadExpanded);
   const [errors, setErrors] = useState<string[]>([]);
@@ -50,9 +55,11 @@ export default function App() {
   const [busy, setBusy] = useState<string | null>(null);
   const [layout, setLayoutState] = useState<Layout>(loadLayout);
   const setLayout = (p: Partial<Layout>) => setLayoutState((l) => { const n = { ...l, ...p }; localStorage.setItem('pn.layout', JSON.stringify(n)); return n; });
-  const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 760px)').matches);
+  // One-pane-at-a-time layout: iPhone, or a desktop window squeezed very narrow
+  const NARROW_Q = `(max-width: ${desktop ? 480 : 760}px)`;
+  const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW_Q).matches);
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 760px)');
+    const mq = window.matchMedia(NARROW_Q);
     const h = () => setNarrow(mq.matches);
     mq.addEventListener('change', h);
     return () => mq.removeEventListener('change', h);
@@ -106,11 +113,9 @@ export default function App() {
     }
     const q = query.trim().toLowerCase();
     if (q) { const words = q.split(/\s+/); ns = ns.filter((n) => { const t = noteText(n); return words.every((w) => t.includes(w)); }); }
-    if (sortRecent || q || view.type !== 'folder') ns.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-    else ns.sort((a, b) => (a.folder_id === b.folder_id ? a.sort - b.sort : store.folderPath(a.folder_id).localeCompare(store.folderPath(b.folder_id))));
     return ns;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store.getVersion(), view, query, sortRecent]);
+  }, [store.getVersion(), view, query]);
 
   const note = selected ? store.state.notes.get(selected) ?? null : null;
 
@@ -144,10 +149,10 @@ export default function App() {
     setSelected(n.id); setPane('note');
   });
 
-  const newFolder = (parent: string | null) => {
-    const name = window.prompt(parent ? 'New subfolder name' : 'New folder name');
+  const newFolder = async (parent: string | null) => {
+    const name = await askText(parent ? 'New subfolder name' : 'New folder name');
     if (!name?.trim()) return;
-    void run('Creating folder…', async () => {
+    await run('Creating folder…', async () => {
       const f = await store.createFolder(name.trim(), parent);
       if (parent) setExpanded((s) => new Set(s).add(parent));
       setView({ type: 'folder', id: f.id });
@@ -157,8 +162,8 @@ export default function App() {
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const folderActions = (f: Folder) => (
     <div className="folder-menu" onClick={(e) => e.stopPropagation()}>
-      <button onClick={() => { setMenuFor(null); newFolder(f.id); }}>New subfolder</button>
-      <button onClick={() => { setMenuFor(null); const n = window.prompt('Rename folder', f.name); if (n?.trim()) void run('Renaming…', () => store.updateFolder(f.id, { name: n.trim() })); }}>Rename</button>
+      <button onClick={() => { setMenuFor(null); void newFolder(f.id); }}>New subfolder</button>
+      <button onClick={() => { setMenuFor(null); void askText('Rename folder', f.name).then((n) => { if (n?.trim()) void run('Renaming…', () => store.updateFolder(f.id, { name: n.trim() })); }); }}>Rename</button>
       <button onClick={() => { setMenuFor(null); void run('Saving folder…', async () => { const p = await exportFolder(f.id); if (p) say(`Saved ${p}`); }); }}>Save folder as .pn</button>
       <button className="danger" onClick={() => { setMenuFor(null); if (window.confirm(`Delete "${f.name}" and move all its notes to Trash?`)) void run('Deleting…', async () => { await store.deleteFolder(f.id); setView({ type: 'all' }); }); }}>Delete folder</button>
     </div>
@@ -169,7 +174,7 @@ export default function App() {
     const cur = selected ? store.state.notes.get(selected) : undefined;
     switch (menuCmd.id) {
       case 'new-note': void newNote(); break;
-      case 'new-folder': newFolder(view.type === 'folder' ? view.id : null); break;
+      case 'new-folder': void newFolder(view.type === 'folder' ? view.id : null); break;
       case 'import-onenote': setShowImport(true); break;
       case 'open-pn': void pickFiles('.pn', true).then((fs) => fs.forEach((f) => void run(`Opening ${f.name}…`, async () => say(await importPn(await f.arrayBuffer(), view.type === 'folder' ? view.id : null))))); break;
       case 'save-note': if (cur && !cur.deleted) void run('Saving note…', async () => { const p = await exportNote(cur.id); if (p) say(`Saved ${p}`); }); else fail('Save note: select a note first.'); break;
@@ -195,7 +200,14 @@ export default function App() {
     const active = view.type === 'folder' && view.id === f.id;
     return (
       <div key={f.id}>
-        <div className={active ? 'nav-item active' : 'nav-item'} style={{ paddingLeft: 8 + depth * 14 }}
+        <div className={`nav-item${active ? ' active' : ''}${dropFolder === f.id ? ' drop-target' : ''}`} style={{ paddingLeft: 8 + depth * 14 }}
+          onDragOver={(e) => { if (e.dataTransfer.types.includes(DRAG_TYPE)) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropFolder(f.id); } }}
+          onDragLeave={() => setDropFolder((d) => (d === f.id ? null : d))}
+          onDrop={(e) => {
+            e.preventDefault(); setDropFolder(null);
+            const ids = JSON.parse(e.dataTransfer.getData(DRAG_TYPE) || '[]') as string[];
+            if (ids.length) void run('Moving…', async () => { await store.updateNotes(ids.map((id) => ({ id, patch: { folder_id: f.id } }))); say(`Moved ${ids.length} note(s) to ${f.name}`); });
+          }}
           onClick={() => { setView({ type: 'folder', id: f.id }); setPane('list'); }}>
           <span className="twisty" onClick={(e) => { e.stopPropagation(); setExpanded((s) => { const n = new Set(s); if (n.has(f.id)) n.delete(f.id); else n.add(f.id); return n; }); }}>
             {kids.length ? (open ? '▾' : '▸') : ''}
@@ -218,7 +230,7 @@ export default function App() {
   const viewTitle = view.type === 'all' ? 'All notes' : view.type === 'trash' ? 'Trash' : view.type === 'tag' ? `#${view.tag}` : store.folderPath(view.id);
 
   return (
-    <div className={`app pane-${pane}${layout.focus && !narrow ? ' focus' : ''}`}>
+    <div className={`app pane-${pane}${narrow ? ' narrow' : ''}${layout.focus && !narrow ? ' focus' : ''}`}>
       {(!layout.focus || narrow) && <header>
         <button className="only-mobile" onClick={() => setPane(pane === 'note' ? 'list' : 'nav')}>{pane === 'note' ? '‹ Notes' : '☰'}</button>
         <strong className="brand">PermaNotes</strong>
@@ -236,10 +248,10 @@ export default function App() {
       )}
       {busy && <div className="busy"><div className="bar indeterminate" /> {busy}</div>}
       {toast && <div className="toast" onClick={() => setToast(null)}>{toast}</div>}
-      <main style={{ gridTemplateColumns: `${showFolders ? '250px ' : ''}${showList ? '300px ' : ''}minmax(0, 1fr)` }}>
+      <main style={{ gridTemplateColumns: `${showFolders ? 'min(250px, 26vw) ' : ''}${showList ? 'min(300px, 32vw) ' : ''}minmax(0, 1fr)` }}>
         {showFolders && <nav className="sidebar">
           <div className={view.type === 'all' ? 'nav-item active' : 'nav-item'} onClick={() => { setView({ type: 'all' }); setPane('list'); }}>🗂 All notes <span className="count">{store.liveNotes().length}</span></div>
-          <div className="nav-head">Folders <button className="mini" title="New folder" onClick={() => newFolder(null)}>＋</button></div>
+          <div className="nav-head">Folders <button className="mini" title="New folder" onClick={() => void newFolder(null)}>＋</button></div>
           {childrenOf(null).map((f) => renderFolder(f, 0))}
           {folders.length === 0 && <div className="hint">No folders yet. Click ＋ or import your OneNote notes.</div>}
           <div className="nav-head">Tags</div>
@@ -255,19 +267,12 @@ export default function App() {
             <input type="search" placeholder="Search…" value={query} onChange={(e) => setQuery(e.target.value)} />
             <div className="list-actions">
               {view.type !== 'trash' && <button onClick={newNote}>＋ New note</button>}
-              {view.type === 'folder' && <label className="chk"><input type="checkbox" checked={sortRecent} onChange={(e) => setSortRecent(e.target.checked)} /> Newest first</label>}
             </div>
           </div>
-          <div className="list-items">
-            {list.map((n) => (
-              <div key={n.id} className={n.id === selected ? 'note-item active' : 'note-item'} onClick={() => { setSelected(n.id); setPane('note'); }}>
-                <div className="note-title">{n.title || 'Untitled'}</div>
-                <div className="note-snippet">{noteText(n).slice(n.title.length + n.tags.join(' ').length + 2, n.title.length + 120)}</div>
-                <div className="note-meta">{new Date(n.updated_at).toLocaleDateString()}{view.type !== 'folder' && n.folder_id ? ` · ${store.folderPath(n.folder_id)}` : ''}</div>
-              </div>
-            ))}
-            {list.length === 0 && <div className="hint">{query ? 'No matches.' : 'No notes here yet.'}</div>}
-          </div>
+          <NoteList notes={list} showFolder={view.type !== 'folder'} trash={view.type === 'trash'} openId={selected}
+            selection={selection} setSelection={setSelection} onOpen={(id) => { setSelected(id); setPane('note'); }}
+            sortMode={sortMode} setSortMode={setSortMode} run={run}
+            snippet={(n) => noteText(n).slice(n.title.length + n.tags.join(' ').length + 2, n.title.length + 120)} />
         </section>}
         <section className="note">
           {note && !note.deleted && (
@@ -285,6 +290,8 @@ export default function App() {
                   {folders.map((f) => ({ f, p: store.folderPath(f.id) })).sort((a, b) => a.p.localeCompare(b.p)).map(({ f, p }) => <option key={f.id} value={f.id}>{p}</option>)}
                 </select>
                 <span className="spacer" />
+                <button className={store.isPinned(note) ? 'tb on' : 'tb'} title={store.isPinned(note) ? `Pinned #${note.pinned} — click to unpin` : 'Pin to the top of the list'}
+                  onClick={() => void run('Pinning…', () => store.pinNotes([note.id], !store.isPinned(note)))}>📌{store.isPinned(note) ? ` #${note.pinned}` : ''}</button>
                 <button className="tb" title={layout.focus ? 'Exit full page (Esc)' : 'Full page view (Ctrl+Shift+F)'} onClick={() => setLayout({ focus: !layout.focus })}>{layout.focus ? '⤡' : '⤢'}</button>
                 <button onClick={() => { if (window.confirm('Move this note to Trash?')) void run('Deleting…', async () => { await store.updateNote(note.id, { deleted: true }); setSelected(null); setPane('list'); }); }}>Delete</button>
               </div>
@@ -300,6 +307,7 @@ export default function App() {
           {!note && <div className="empty"><p>Select a note, or create a new one.</p>{layout.focus && <button onClick={() => setLayout({ focus: false })}>Exit full page</button>}{!layout.focus && (!layout.folders || !layout.list) && <button onClick={() => setLayout({ folders: true, list: true })}>Show folders and notes</button>}</div>}
         </section>
       </main>
+      <PromptHost />
       {showSettings && <Settings onClose={() => setShowSettings(false)} onError={fail} />}
       {showImport && <ImportDialog onClose={() => setShowImport(false)} onError={fail} onDone={(m) => say(m)} targetFolder={currentFolder} />}
     </div>

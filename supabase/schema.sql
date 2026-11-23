@@ -6,7 +6,7 @@ create table if not exists public.folders (
   user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   parent_id uuid,
   name text not null default '',
-  sort integer not null default 0,
+  sort double precision not null default 0,
   updated_at timestamptz not null,
   deleted boolean not null default false,
   server_updated_at timestamptz not null default now()
@@ -19,7 +19,8 @@ create table if not exists public.notes (
   title text not null default '',
   html text not null default '',
   tags text[] not null default '{}',
-  sort integer not null default 0,
+  sort double precision not null default 0,
+  pinned double precision,
   created_at timestamptz not null,
   updated_at timestamptz not null,
   deleted boolean not null default false,
@@ -40,12 +41,17 @@ create table if not exists public.attachments (
   server_updated_at timestamptz not null default now()
 );
 
+-- Upgrades for databases created with PermaNotes 1.0.0 / 1.0.1
+alter table public.notes add column if not exists pinned double precision;
+alter table public.notes alter column sort type double precision;
+alter table public.folders alter column sort type double precision;
+
 create index if not exists folders_sync on public.folders (user_id, server_updated_at);
 create index if not exists notes_sync on public.notes (user_id, server_updated_at);
 create index if not exists attachments_sync on public.attachments (user_id, server_updated_at);
 
 -- Every write gets a server timestamp, so devices never miss a change because of a wrong clock.
-create or replace function public.pn_touch() returns trigger language plpgsql as $$
+create or replace function public.pn_touch() returns trigger language plpgsql set search_path = '' as $$
 begin
   new.server_updated_at := clock_timestamp();
   return new;

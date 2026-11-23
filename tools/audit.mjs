@@ -84,6 +84,9 @@ const platform = r('src/lib/platform.ts');
 const iface = platform.slice(platform.indexOf('interface DesktopBridge'), platform.indexOf('}', platform.indexOf('interface DesktopBridge')));
 for (const m of iface.matchAll(/^\s+(\w+)\(/gm)) check(bridgeMethods.has(m[1]), `DesktopBridge.${m[1]} is declared but preload does not expose it`);
 
+// window.prompt does not exist in the desktop app (Electron) — 1.0.1 shipped New Folder/Rename/Link broken on PC
+for (const f of files.filter((f) => f.startsWith('src/') && /\.(ts|tsx)$/.test(f))) check(!/window\.prompt\(|[^.\w]prompt\(/.test(r(f).replace(/askText|PromptHost/g, '')), `${f}: uses prompt(), which silently does nothing in the desktop app — use askText()`);
+
 // 9. Every relative import in src resolves
 for (const f of files.filter((f) => f.startsWith('src/') && /\.(ts|tsx)$/.test(f))) {
   for (const m of r(f).matchAll(/from\s+'(\.[^']+)'/g)) {
@@ -137,6 +140,15 @@ if (on.includes('data-bullet')) {
 const appSrc = r('src/App.tsx');
 for (const m of new Set([...main.matchAll(/send\('([\w-]+)'\)/g)].map((x) => x[1]))) check(appSrc.includes(`case '${m}':`), `menu command '${m}' (electron/main.cjs) is not handled in App.tsx`);
 check(/Menu\.setApplicationMenu/.test(main), 'desktop File menu is not installed');
+// 1.0.2: one-way IPC (zoom) needs a listener in main
+for (const c of [...pre.matchAll(/ipcRenderer\.send\('([^']+)'/g)].map((m) => m[1])) check(main.includes(`ipcMain.on('${c}'`), `IPC ${c} is sent from preload but main has no ipcMain.on`);
+check(/addEventListener\('wheel'[\s\S]*ctrlKey[\s\S]*preventDefault/.test(pre), 'Ctrl+wheel zoom listener missing in preload');
+check(/savePrefs\(\)/.test(main) && /setZoomFactor\(prefs\.zoom\)/.test(main) && /did-finish-load/.test(main), 'zoom is not persisted/re-applied on launch');
+const minW = Number(/minWidth:\s*(\d+)/.exec(main)?.[1] ?? 9999);
+check(minW <= 200, `window minWidth is ${minW}; it must be able to shrink to a narrow strip`);
+// fractional custom order + pins need these column types; old databases need the upgrade lines
+check(/sort double precision/.test(sql.slice(sql.indexOf('public.notes ('))) && /alter table public\.notes alter column sort type double precision/.test(sql), 'notes.sort must be double precision (drag reorder uses fractions), with an upgrade line for old databases');
+check(/alter table public\.notes add column if not exists pinned/.test(sql), 'schema.sql: missing upgrade line for notes.pinned');
 check(r('electron/preload.cjs').includes("ipcRenderer.on('pn:menu'") && main.includes("webContents.send('pn:menu'"), 'pn:menu IPC not wired both ways');
 check(r('src/lib/util.ts').includes('data-pn-att="'), 'attachmentIdsIn must find data-pn-att blocks (else .pn exports drop attachments)');
 

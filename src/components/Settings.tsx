@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { getStatus, loadSettings, onStatus, saveSettings, signIn, signOut, storageUsage, syncNow, type SyncStatus } from '../lib/sync';
+import { usingBuiltIn, getStatus, loadSettings, onStatus, saveSettings, signIn, signOut, storageUsage, syncNow, type SyncStatus } from '../lib/sync';
 import { APP_VERSION, desktop } from '../lib/platform';
 import { errText, formatBytes } from '../lib/util';
+import { DEFAULT_SYNC } from '../config';
 
 export function Settings({ onClose, onError }: { onClose: () => void; onError: (m: string) => void }) {
   const cur = loadSettings();
@@ -14,6 +15,7 @@ export function Settings({ onClose, onError }: { onClose: () => void; onError: (
   const [backupDir, setBackupDir] = useState('');
   const [working, setWorking] = useState(false);
   const [localErr, setLocalErr] = useState('');
+  const [advanced, setAdvanced] = useState(!usingBuiltIn() && !!cur);
 
   useEffect(() => onStatus(setStatus), []);
   useEffect(() => { void storageUsage().then(setUsage); void desktop?.backupFolder().then(setBackupDir); }, []);
@@ -39,18 +41,23 @@ export function Settings({ onClose, onError }: { onClose: () => void; onError: (
         )}
         <p className="small">Attachments: {formatBytes(usage)} {usage > 900 * 1024 * 1024 && <b className="err"> — close to Supabase's free 1 GB file storage.</b>}</p>
 
-        <h3>1. Connect to your Supabase project</h3>
-        <p className="small">From Supabase › Project Settings › API (see "SETUP SYNC.txt"). Use the same two values on every device.</p>
-        <label>Project URL<input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://xxxx.supabase.co" /></label>
-        <label>Anon / publishable key<input value={key} onChange={(e) => setKey(e.target.value)} placeholder="eyJ… or sb_publishable_…" /></label>
-        <div className="row">
-          <button disabled={working} onClick={() => act(() => saveSettings({ url, key }))}>Save connection</button>
-          {cur && <button disabled={working} onClick={() => act(() => saveSettings(null))}>Turn sync off</button>}
-        </div>
+        <h3>Sync database</h3>
+        {cur && usingBuiltIn() && <p className="small">Connected to your PermaNotes database. Sign in below on each device with the same email and password.</p>}
+        {!cur && <div className="row"><button disabled={working} onClick={() => act(() => saveSettings(DEFAULT_SYNC))}>Turn sync on</button></div>}
+        <details open={advanced} onToggle={(e) => setAdvanced((e.target as HTMLDetailsElement).open)}>
+          <summary className="small">Advanced: use a different Supabase project</summary>
+          <label>Project URL<input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://xxxx.supabase.co" /></label>
+          <label>Anon / publishable key<input value={key} onChange={(e) => setKey(e.target.value)} placeholder="eyJ… or sb_publishable_…" /></label>
+          <div className="row">
+            <button disabled={working} onClick={() => act(() => saveSettings({ url, key }))}>Save connection</button>
+            <button disabled={working} onClick={() => act(() => saveSettings(DEFAULT_SYNC))}>Use built-in database</button>
+            {cur && <button disabled={working} onClick={() => act(() => saveSettings(null))}>Turn sync off</button>}
+          </div>
+        </details>
 
         {cur && (
           <>
-            <h3>2. Sign in</h3>
+            <h3>Sign in</h3>
             {status.email ? (
               <div className="row">
                 <button disabled={working} onClick={() => act(() => syncNow())}>Sync now</button>

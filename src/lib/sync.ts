@@ -4,6 +4,7 @@ import * as db from './db';
 import { onLocalChange, saveLocal, state } from './store';
 import type { AttachmentMeta, Folder, Note } from './types';
 import { errText, uid } from './util';
+import { DEFAULT_SYNC } from '../config';
 
 export const BUCKET = 'attachments';
 export const TABLES = ['folders', 'notes', 'attachments'] as const;
@@ -22,12 +23,15 @@ export const onStatus = (fn: (s: SyncStatus) => void) => { listeners.add(fn); fn
 const setStatus = (p: Partial<SyncStatus>) => { status = { ...status, ...p }; for (const l of listeners) l(status); };
 export const getStatus = () => status;
 
+// Built-in database unless this device was pointed elsewhere (or sync was turned off) in Settings
 export function loadSettings(): SyncSettings | null {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    return raw ? (JSON.parse(raw) as SyncSettings) : null;
-  } catch { return null; }
+    if (raw === 'off') return null;
+    return raw ? (JSON.parse(raw) as SyncSettings) : DEFAULT_SYNC;
+  } catch { return DEFAULT_SYNC; }
 }
+export const usingBuiltIn = () => { const s = loadSettings(); return !!s && s.url === DEFAULT_SYNC.url && s.key === DEFAULT_SYNC.key; };
 
 export async function saveSettings(s: SyncSettings | null) {
   if (s) {
@@ -36,7 +40,7 @@ export async function saveSettings(s: SyncSettings | null) {
     if (s.key.trim().length < 20) throw new Error('That key looks too short. Copy the "anon public" or "publishable" key from Supabase > Project Settings > API.');
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({ url, key: s.key.trim() }));
   } else {
-    localStorage.removeItem(SETTINGS_KEY);
+    localStorage.setItem(SETTINGS_KEY, 'off');
   }
   await startSync();
 }
@@ -52,7 +56,7 @@ export async function startSync() {
   });
   const { data, error } = await client.auth.getSession();
   if (error) { setStatus({ phase: 'error', message: `Could not read sign-in: ${error.message}` }); return; }
-  if (!data.session) { setStatus({ phase: 'signed-out', message: 'Sign in to sync your notes.', email: null }); return; }
+  if (!data.session) { setStatus({ phase: 'signed-out', message: 'Sign in to sync your notes (gear › Sync).', email: null }); return; }
   setStatus({ email: data.session.user.email ?? null });
   subscribeRealtime();
   void syncNow();
@@ -185,7 +189,7 @@ async function pull(_userId: string) {
   const copies: Note[] = [];
   for (const r of rn) {
     track(r);
-    const remote: Note = { id: r.id, folder_id: (r.folder_id as string) ?? null, title: (r.title as string) ?? '', html: (r.html as string) ?? '', tags: (r.tags as string[]) ?? [], sort: (r.sort as number) ?? 0, created_at: r.created_at as string, updated_at: r.updated_at, deleted: !!r.deleted, dirty: false, synced_at: r.updated_at };
+    const remote: Note = { id: r.id, folder_id: (r.folder_id as string) ?? null, title: (r.title as string) ?? '', html: (r.html as string) ?? '', tags: (r.tags as string[]) ?? [], sort: Number(r.sort ?? 0), pinned: r.pinned == null ? null : Number(r.pinned), created_at: r.created_at as string, updated_at: r.updated_at, deleted: !!r.deleted, dirty: false, synced_at: r.updated_at };
     const l = state.notes.get(r.id);
     if (l?.dirty && l.updated_at !== r.updated_at) {
       if (r.updated_at === l.synced_at) continue; // server still has the version we started from; our edit wins on push
@@ -241,7 +245,7 @@ async function push(userId: string, problems: string[]) {
       const rows = batch.map((x) => ({ ...strip(x), user_id: userId }));
       const { error } = await c.from(table).upsert(rows);
       if (error) {
-        problems.push(`Saving ${batch.length} ${table} to Supabase failed: ${error.message}`);
+        problems.push(`Saving ${batch.length} ${table} to Supabase failed: ${error.message}${/column|schema cache|invalid input syntax for type integer/i.test(error.message) ? ' — your Supabase database needs the latest setup: open supabase/schema.sql (from the newest Source zip), paste it into Supabase > SQL Editor and click Run.' : ''}`);
       } else {
         for (const x of batch) await markClean(table, x);
       }

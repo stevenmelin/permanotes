@@ -16,7 +16,8 @@ export interface Note {
   title: string;
   html: string; // attachments referenced as pn-att:<id>
   tags: string[];
-  sort: number;
+  sort: number; // custom list order (drag to reorder)
+  pinned?: number | null; // pin position: 1 = top. null/undefined = not pinned
   created_at: string;
   updated_at: string;
   deleted: boolean;

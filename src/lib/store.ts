@@ -83,16 +83,70 @@ export async function deleteFolder(id: string) {
 // ---------- notes ----------
 export async function createNote(folder_id: string | null, title = '', html = '<p></p>', tags: string[] = []): Promise<Note> {
   const t = now();
-  const sort = [...state.notes.values()].filter((n) => n.folder_id === folder_id && !n.deleted).length;
-  const n: Note = { id: uid(), folder_id, title, html, tags, sort, created_at: t, updated_at: t, deleted: false, dirty: true, synced_at: null };
+  const n: Note = { id: uid(), folder_id, title, html, tags, sort: minSort() - 1, pinned: null, created_at: t, updated_at: t, deleted: false, dirty: true, synced_at: null };
   await saveLocal('notes', [n]);
   return n;
 }
+
+// New notes go to the top of the custom order
+function minSort() { let m = 0; for (const n of state.notes.values()) if (!n.deleted && n.sort < m) m = n.sort; return m; }
 
 export async function updateNote(id: string, patch: Partial<Note>) {
   const n = state.notes.get(id);
   if (!n) throw new Error(`Note ${id} not found`);
   await saveLocal('notes', [{ ...n, ...patch, updated_at: now(), dirty: true }]);
+}
+
+// Save several notes at once (pinning, reordering, moving)
+export async function updateNotes(changes: { id: string; patch: Partial<Note> }[]) {
+  const t = now();
+  const out: Note[] = [];
+  for (const { id, patch } of changes) {
+    const n = state.notes.get(id);
+    if (!n) throw new Error(`Note ${id} not found`);
+    out.push({ ...n, ...patch, updated_at: t, dirty: true });
+  }
+  await saveLocal('notes', out);
+}
+
+export const isPinned = (n: Note) => n.pinned != null;
+
+export async function pinNotes(ids: string[], pin: boolean) {
+  const pinned = liveNotes().filter(isPinned).sort((a, b) => a.pinned! - b.pinned!);
+  if (pin) {
+    let next = pinned.length ? pinned[pinned.length - 1].pinned! + 1 : 1;
+    await updateNotes(ids.filter((id) => !isPinned(state.notes.get(id)!)).map((id) => ({ id, patch: { pinned: next++ } })));
+  } else {
+    await updateNotes(ids.filter((id) => isPinned(state.notes.get(id)!)).map((id) => ({ id, patch: { pinned: null } })));
+  }
+  await renumberPins();
+}
+
+// Keep pin numbers 1, 2, 3… with no gaps
+export async function renumberPins(order?: string[]) {
+  const pinned = order ?? liveNotes().filter(isPinned).sort((a, b) => a.pinned! - b.pinned!).map((n) => n.id);
+  const changes = pinned.map((id, i) => ({ id, patch: { pinned: i + 1 } })).filter((c) => state.notes.get(c.id)!.pinned !== c.patch.pinned);
+  if (changes.length) await updateNotes(changes);
+}
+
+// Place `moving` notes between `before` and `after` in a list ordered by `sort`.
+// `list` is the full visible order (without the moving notes) so ties can be renumbered.
+export async function placeNotes(moving: string[], list: Note[], index: number, extra: Partial<Note> = {}) {
+  const prev = list[index - 1];
+  const next = list[index];
+  let changes: { id: string; patch: Partial<Note> }[];
+  const lo = prev ? prev.sort : (next ? next.sort - moving.length - 1 : 0);
+  const hi = next ? next.sort : lo + moving.length + 1;
+  if (hi - lo > 1e-6 * (moving.length + 1)) {
+    const step = (hi - lo) / (moving.length + 1);
+    changes = moving.map((id, i) => ({ id, patch: { ...extra, sort: lo + step * (i + 1) } }));
+  } else {
+    // ties: renumber the whole visible list
+    const ids = [...list.slice(0, index).map((n) => n.id), ...moving, ...list.slice(index).map((n) => n.id)];
+    changes = ids.map((id, i) => ({ id, patch: moving.includes(id) ? { ...extra, sort: i } : { sort: i } }))
+      .filter((c) => moving.includes(c.id) || state.notes.get(c.id)!.sort !== c.patch.sort);
+  }
+  await updateNotes(changes);
 }
 
 // ---------- attachments ----------

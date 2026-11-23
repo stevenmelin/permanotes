@@ -22,6 +22,17 @@ header { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border
 .sync.synced { color: var(--ok); } .sync.error { color: var(--danger); border-color: var(--danger); } .sync.offline { color: #a66b00; }
 main { flex: 1; display: grid; grid-template-columns: 250px 300px minmax(0, 1fr); min-height: 0; min-width: 0; overflow: hidden; }
 main > * { min-width: 0; }
+header { overflow-x: auto; scrollbar-width: none; }
+.list-tools { display: flex; gap: 6px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.list-tools select { font-size: 13px; padding: 3px 4px; }
+.list-section { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 8px 12px 2px; }
+.note-item.selected { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.note-item[draggable="true"] { cursor: grab; }
+.pin-badge { font-size: 11px; color: var(--accent); margin-right: 6px; font-weight: 700; }
+.drop-line { height: 3px; background: var(--accent); margin: -1px 6px; border-radius: 2px; box-shadow: 0 0 0 1px var(--panel); position: relative; z-index: 1; }
+.list-tail { min-height: 60px; flex: 1; }
+.list-items { display: flex; flex-direction: column; }
+.nav-item.drop-target { outline: 2px solid var(--accent); background: var(--accent-soft); }
 .sidebar { overflow: auto; border-right: 1px solid var(--line); padding: 8px 0; }
 .nav-item { display: flex; align-items: center; gap: 4px; padding: 5px 8px; cursor: pointer; border-radius: 4px; margin: 0 6px; }
 .nav-item:hover { background: var(--accent-soft); } .nav-item.active { background: var(--accent-soft); font-weight: 600; }
@@ -119,22 +130,24 @@ ul[data-type="taskList"] li[data-checked="true"] > div { color: var(--muted); te
 .fatal { color: #b3261e; padding: 20px; }
 .only-mobile { display: none; }
 
+/* Narrow window or iPhone: one pane at a time (class set in App.tsx) */
+.app.narrow .only-mobile { display: inline-block; }
+.app.narrow .brand { display: none; }
+.app.narrow header { gap: 4px; padding: 6px 8px; }
+.app.narrow header button:not(.only-mobile):not(.sync) { padding: 5px 7px; font-size: 13px; }
+.app.narrow main { grid-template-columns: 1fr; }
+.app.narrow .sidebar,.app.narrow .list,.app.narrow .note { display: none; }
+.app.narrow.pane-nav .sidebar,.app.narrow.pane-list .list,.app.narrow.pane-note .note { display: flex; flex-direction: column; }
+.app.narrow.pane-nav .sidebar { display: block; }
+.app.narrow .editor .title { font-size: 21px; padding: 10px 14px 2px; }
+.app.narrow .content { padding: 8px 14px 120px; }
+.app.narrow .toolbar { padding: 6px 8px; overflow-x: auto; flex-wrap: nowrap; }
+.app.narrow main { grid-template-columns: 1fr !important; }
+.app.narrow .pane-toggles { display: none; }
+.app.narrow .page { width: auto !important; }
+.app.narrow .width-handle { display: none; }
 @media (max-width: 760px) {
-  .only-mobile { display: inline-block; }
-  .brand { display: none; }
-  header { gap: 4px; padding: 6px 8px; }
-  header button:not(.only-mobile):not(.sync) { padding: 5px 7px; font-size: 13px; }
-  main { grid-template-columns: 1fr; }
-  .sidebar, .list, .note { display: none; }
-  .pane-nav .sidebar, .pane-list .list, .pane-note .note { display: flex; flex-direction: column; }
-  .pane-nav .sidebar { display: block; }
-  .editor .title { font-size: 21px; padding: 10px 14px 2px; }
-  .content { padding: 8px 14px 120px; }
-  .toolbar { padding: 6px 8px; overflow-x: auto; flex-wrap: nowrap; }
   input, select { font-size: 16px; } /* stops iPhone zooming on focus */
-  main { grid-template-columns: 1fr !important; }
-  .pane-toggles { display: none; }
-  .page { width: auto !important; }
-  .width-handle { display: none; }
-  .content .ProseMirror { font-size: 16px; }
+  .app.narrow .content .ProseMirror { font-size: 16px; }
 }
+.modal.prompt { width: min(420px, 94vw); }

@@ -12,3 +12,10 @@ contextBridge.exposeInMainWorld('permanotes', {
   version: () => ipcRenderer.invoke('pn:version'),
   onMenu: (cb) => ipcRenderer.on('pn:menu', (_e, id) => cb(id)),
 });
+
+// Ctrl + mouse wheel (or trackpad pinch) zooms the whole app; the main process remembers the size
+window.addEventListener('wheel', (e) => {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  ipcRenderer.send('pn:zoom-wheel', e.deltaY);
+}, { passive: false });

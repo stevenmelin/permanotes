@@ -1,5 +1,5 @@
 // PermaNotes desktop shell (Windows + Mac). Serves the built web app from app://permanotes/
-const { app, BrowserWindow, protocol, net, ipcMain, dialog, shell, Menu } = require('electron');
+const { app, BrowserWindow, protocol, net, ipcMain, dialog, shell, Menu, screen } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
@@ -67,6 +67,34 @@ if (!app.requestSingleInstanceLock()) {
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 }
 
+// ---------- remembered window size, position and zoom ----------
+const prefsFile = () => path.join(app.getPath('userData'), 'window-prefs.json');
+let prefs = { zoom: 1, bounds: null, maximized: false };
+function loadPrefs() {
+  try { prefs = { ...prefs, ...JSON.parse(fs.readFileSync(prefsFile(), 'utf8')) }; }
+  catch (e) { if (e.code !== 'ENOENT') console.error('Could not read window-prefs.json:', e); }
+}
+function savePrefs() {
+  try { fs.writeFileSync(prefsFile(), JSON.stringify(prefs)); }
+  catch (e) { dialog.showErrorBox('PermaNotes', `Could not save window settings to ${prefsFile()}:\n\n${e.stack || e}`); }
+}
+const ZOOM_MIN = 0.3, ZOOM_MAX = 3;
+function setZoom(z) {
+  prefs.zoom = Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)) * 100) / 100;
+  if (win) win.webContents.setZoomFactor(prefs.zoom);
+  savePrefs();
+}
+ipcMain.on('pn:zoom-wheel', (_e, deltaY) => {
+  // mouse wheel notch ~ 10%, trackpad pinch is smooth
+  setZoom(prefs.zoom * Math.exp(-Math.max(-300, Math.min(300, deltaY)) * 0.001));
+});
+function boundsVisible(b) {
+  return b && screen.getAllDisplays().some((d) => {
+    const a = d.workArea;
+    return b.x < a.x + a.width - 40 && b.x + b.width > a.x + 40 && b.y >= a.y - 10 && b.y < a.y + a.height - 40;
+  });
+}
+
 // ---------- application menu ----------
 const send = (id) => () => { if (win) win.webContents.send('pn:menu', id); };
 function buildMenu() {
@@ -104,7 +132,10 @@ function buildMenu() {
         { label: 'Reset Text Width', click: send('reset-width') },
         { type: 'separator' },
         { role: 'togglefullscreen' },
-        { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
+        { label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: () => setZoom(1) },
+        { label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: () => setZoom(prefs.zoom + 0.1) },
+        { label: 'Zoom In ', accelerator: 'CmdOrCtrl+Plus', visible: false, click: () => setZoom(prefs.zoom + 0.1) },
+        { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: () => setZoom(prefs.zoom - 0.1) },
         { type: 'separator' },
         { role: 'reload' }, { role: 'toggleDevTools' },
       ],
@@ -124,8 +155,10 @@ function buildMenu() {
 
 function createWindow() {
   buildMenu();
+  loadPrefs();
+  const b = boundsVisible(prefs.bounds) ? prefs.bounds : { width: 1280, height: 820 };
   win = new BrowserWindow({
-    width: 1280, height: 820, minWidth: 700, minHeight: 500,
+    ...b, minWidth: 160, minHeight: 120,
     title: 'PermaNotes',
     icon: path.join(__dirname, '..', 'build', 'icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, spellcheck: true },
@@ -147,6 +180,20 @@ function createWindow() {
     items.push({ role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' });
     Menu.buildFromTemplate(items).popup();
   });
+  if (prefs.maximized) win.maximize();
+  // zoom is re-applied on every page load (it does not stick to app:// on its own)
+  win.webContents.on('did-finish-load', () => win.webContents.setZoomFactor(prefs.zoom));
+  win.webContents.setVisualZoomLevelLimits(1, 1); // trackpad pinch goes through our own zoom instead
+  const remember = () => {
+    if (!win || win.isDestroyed()) return;
+    prefs.maximized = win.isMaximized();
+    if (!win.isMaximized() && !win.isMinimized() && !win.isFullScreen()) prefs.bounds = win.getBounds();
+  };
+  let t = null;
+  const later = () => { clearTimeout(t); t = setTimeout(() => { remember(); savePrefs(); }, 500); };
+  win.on('resize', later);
+  win.on('move', later);
+  win.on('close', () => { remember(); savePrefs(); });
   win.loadURL('app://permanotes/index.html');
 }
 

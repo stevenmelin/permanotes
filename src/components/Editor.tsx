@@ -8,6 +8,7 @@ import Highlight from '@tiptap/extension-highlight';
 import Image from '@tiptap/extension-image';
 import { Placeholder } from '@tiptap/extensions';
 import { AttachmentNode } from './AttachmentNode';
+import { askText } from './Prompt';
 import { rememberUrl, resolveHtml, unresolveHtml } from '../lib/attachments';
 import { addAttachment, updateNote } from '../lib/store';
 import type { Note } from '../lib/types';
@@ -189,9 +190,10 @@ export function Editor({ note, onError, onExport, showToolbar, textWidth, onText
         </>}
         {b('🔗', 'Link', () => {
           const prev = editor.getAttributes('link').href as string | undefined;
-          const url = window.prompt('Link address', prev ?? 'https://');
-          if (url === null) return;
-          if (url === '') c().unsetLink().run(); else c().extendMarkRange('link').setLink({ href: url }).run();
+          void askText('Link address (leave empty to remove the link)', prev ?? 'https://').then((url) => {
+            if (url === null) return;
+            if (url === '') c().unsetLink().run(); else c().extendMarkRange('link').setLink({ href: url }).run();
+          });
         }, editor.isActive('link'))}
         {b('🖼', 'Insert image', () => { void pickFiles('image/*', true).then((f) => insertFiles(editor, note.id, f)).catch((e) => onError(errText(e))); })}
         {b('📎', 'Attach file or audio', () => { void pickFiles('*/*', true).then((f) => insertFiles(editor, note.id, f)).catch((e) => onError(errText(e))); })}
