@@ -11,6 +11,7 @@ import { AttachmentNode } from './AttachmentNode';
 import { Indent, indentLess, indentMore } from './Indent';
 import { askText } from './Prompt';
 import { getNoteZoom, onNoteZoom } from '../lib/viewprefs';
+import { getScroll, restoreScroll, saveScroll } from '../lib/scrollmem';
 import { rememberUrl, resolveHtml, unresolveHtml } from '../lib/attachments';
 import { addAttachment, updateNote } from '../lib/store';
 import type { Note } from '../lib/types';
@@ -87,6 +88,9 @@ export function Editor({ note, onError, onExport, showToolbar, textWidth, onText
   const lastHtml = useRef<string>(note.html);
   const noteId = useRef(note.id);
   const ready = useRef(false);
+  const scroller = useRef<HTMLDivElement>(null);
+  const firstLoad = useRef(true);
+  const restoring = useRef(false);
 
   const editor = useEditor({
     extensions: editorExtensions,
@@ -145,6 +149,12 @@ export function Editor({ note, onError, onExport, showToolbar, textWidth, onText
       editor.commands.setContent(html, { emitUpdate: false });
       setLoadIssues(failures);
       ready.current = true;
+      // back to where this note was last scrolled on this device (only when switching notes / opening the app)
+      if (switching || firstLoad.current) {
+        firstLoad.current = false;
+        const el = scroller.current;
+        if (el) { restoring.current = true; requestAnimationFrame(() => { restoreScroll(el, getScroll(`note:${note.id}`)); setTimeout(() => { restoring.current = false; }, 300); }); }
+      }
     });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -239,7 +249,7 @@ export function Editor({ note, onError, onExport, showToolbar, textWidth, onText
         <button className="tb" title="Save this note as a .pn file" onClick={onExport}>Save .pn</button>
       </div>}
       {loadIssues.length > 0 && <div className="warn">Some attachments couldn't be loaded: {loadIssues.join(' · ')}</div>}
-      <div className="content">
+      <div className="content" ref={scroller} onScroll={(e) => { if (!restoring.current) saveScroll(`note:${noteId.current}`, (e.target as HTMLElement).scrollTop); }}>
         <div className="page" style={textWidth ? { width: textWidth } : undefined}>
           <div className="note-zoom" style={{ zoom: noteZoom }}><EditorContent editor={editor} /></div>
           <div className="width-handle" title="Drag to make the text narrower or wider. Double-click to fill the window."

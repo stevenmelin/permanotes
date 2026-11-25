@@ -206,6 +206,10 @@ check(/conflicts: _c/.test(sync) && /conflicts: _c/.test(r('src/lib/pnfile.ts'))
 check(/mergeOldConflictCopies/.test(r('src/App.tsx')), 'old conflict copies are never merged');
 check(/pn\.last/.test(r('src/App.tsx')), 'last opened note is not remembered');
 
+// 1.0.8: reopen at the same scroll position (per device, per note)
+check(/ref=\{scroller\}[^>]*onScroll=/.test(r('src/components/Editor.tsx')) && /restoreScroll\(el, getScroll\(`note:/.test(r('src/components/Editor.tsx')), 'note scroll position is not saved/restored');
+check(/pagehide/.test(r('src/lib/scrollmem.ts')) && /visibilitychange/.test(r('src/lib/scrollmem.ts')), 'scroll position must be flushed when the app closes or goes to background (iPhone)');
+
 const rel = relative(process.cwd(), ROOT) || '.';
 if (problems.length) {
   console.error(`\nAUDIT FAILED — ${problems.length} problem(s) in ${checks} checks (${rel}):`);

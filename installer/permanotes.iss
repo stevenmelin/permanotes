@@ -1,6 +1,6 @@
 ; PermaNotes Windows installer (Inno Setup 6). Built by windows\Build Windows Installer.bat
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.7"
+  #define MyAppVersion "1.0.8"
 #endif
 #define MyAppName "PermaNotes"
 #define MyAppExe "PermaNotes.exe"

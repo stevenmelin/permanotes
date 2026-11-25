@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { getScroll, restoreScroll, saveScroll } from '../lib/scrollmem';
 import * as store from '../lib/store';
 import type { Note } from '../lib/types';
 
@@ -37,6 +38,8 @@ export function NoteList(p: Props) {
   const anchor = useRef<string | null>(null);
   const [drop, setDrop] = useState<Drop>(null);
   const dragging = useRef<string[]>([]);
+  const listEl = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (listEl.current) restoreScroll(listEl.current, getScroll('list')); }, []);
 
   const click = (e: React.MouseEvent, id: string) => {
     const multi = e.ctrlKey || e.metaKey;
@@ -152,7 +155,7 @@ export function NoteList(p: Props) {
           : anyPinned && <button title="Unpin" onClick={() => void p.run('Unpinning…', () => store.pinNotes(selectedIds, false))}>Unpin{selectedIds.length > 1 ? ` ${selectedIds.length}` : ''}</button>)}
         {selectedIds.length > 1 && <span className="small">{selectedIds.length} selected</span>}
       </div>
-      <div className="list-items" onDrop={onDrop} onDragOver={(e) => { if (e.dataTransfer.types.includes(DRAG_TYPE)) e.preventDefault(); }}
+      <div className="list-items" ref={listEl} onScroll={(e) => saveScroll('list', (e.target as HTMLElement).scrollTop)} onDrop={onDrop} onDragOver={(e) => { if (e.dataTransfer.types.includes(DRAG_TYPE)) e.preventDefault(); }}
         onDragLeave={(e) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setDrop(null); }}>
         {pinned.length > 0 && <div className="list-section">Pinned</div>}
         {pinned.map((n, i) => row(n, 'pinned', i))}
