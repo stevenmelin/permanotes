@@ -133,7 +133,7 @@ const bucket = /BUCKET = '(\w+)'/.exec(sync)?.[1];
 check(!!bucket && sql.includes(`values ('${bucket}'`), `schema.sql: storage bucket '${bucket}' not created`);
 // every column the client sends must exist
 const types = r('src/lib/types.ts');
-const localOnly = new Set(['dirty', 'synced_at', 'has_blob']);
+const localOnly = new Set(['dirty', 'synced_at', 'has_blob', 'conflicts']);
 for (const [iface2, table] of [['Folder', 'folders'], ['Note', 'notes'], ['AttachmentMeta', 'attachments']]) {
   const body = types.slice(types.indexOf(`interface ${iface2} `), types.indexOf('}', types.indexOf(`interface ${iface2} `)));
   const cols = [...body.matchAll(/^\s+(\w+)\??:/gm)].map((m) => m[1]).filter((c) => !localOnly.has(c));
@@ -196,6 +196,14 @@ check(/gh release upload[^\n]*Windows-Setup\.exe/.test(wf) && /gh release upload
 
 // 15. Electron origin
 check(r('electron/main.cjs').includes("loadURL('app://permanotes/index.html')"), 'electron must load the app:// URL (IndexedDB needs a stable origin)');
+
+// 1.0.6: server timestamps must be compared as times, not text (caused a conflict copy on every save)
+check(!/l\.updated_at [<>]=? r\.updated_at|r\.updated_at === l\.synced_at|l\.updated_at !== r\.updated_at/.test(sync), 'sync.ts compares server/app timestamps as text — use normTime/sameTime/newer');
+check(/decideNote\(/.test(sync) && /normTime\(r\.updated_at\)/.test(sync), 'pull must normalise server timestamps and use decideNote');
+check(!/\(conflict copy\)`/.test(sync), 'sync must not create separate "(conflict copy)" notes — keep conflicts inside the note');
+check(/conflicts: _c/.test(sync) && /conflicts: _c/.test(r('src/lib/pnfile.ts')), 'local-only conflicts must not be uploaded or written to .pn files');
+check(/mergeOldConflictCopies/.test(r('src/App.tsx')), 'old conflict copies are never merged');
+check(/pn\.last/.test(r('src/App.tsx')), 'last opened note is not remembered');
 
 const rel = relative(process.cwd(), ROOT) || '.';
 if (problems.length) {

@@ -129,6 +129,7 @@ export function NoteList(p: Props) {
         onClick={(e) => click(e, n.id)}>
         <div className="note-title">
           {zone === 'pinned' && <span className="pin-badge" title="Pinned — drag to change the order">📌 #{idx + 1}</span>}
+          {n.conflicts?.some((c) => !c.auto) && <span className="conflict-dot" title="Changed in two places — open to compare">⚠ </span>}
           {n.title || 'Untitled'}
         </div>
         <div className="note-snippet">{p.snippet(n)}</div>

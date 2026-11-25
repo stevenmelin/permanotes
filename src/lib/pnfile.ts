@@ -12,7 +12,7 @@ export async function packPn(bundle: PnBundle, getBytes: (id: string) => Promise
   const clean = {
     ...bundle,
     folders: bundle.folders.map(({ dirty: _d, synced_at: _s, ...f }) => f),
-    notes: bundle.notes.map(({ dirty: _d, synced_at: _s, ...n }) => n),
+    notes: bundle.notes.map(({ dirty: _d, synced_at: _s, conflicts: _c, ...n }) => n),
     attachments: bundle.attachments.map(({ dirty: _d, synced_at: _s, has_blob: _h, ...a }) => a),
   };
   zip.file(PN_MANIFEST, JSON.stringify(clean, null, 1));

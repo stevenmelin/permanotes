@@ -155,3 +155,29 @@ ul[data-type="taskList"] li[data-checked="true"] > div { color: var(--muted); te
 .modal.prompt { width: min(420px, 94vw); }
 .zoom-row { align-items: center; }
 .zoom-row b { min-width: 48px; text-align: center; }
+/* conflict review */
+.conflict-view { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.cv-head { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: flex-start; padding: 10px 16px; background: #fff4d6; color: #4a3500; border-bottom: 1px solid var(--line); }
+.cv-summary { font-size: 13px; margin-top: 2px; }
+.cv-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.cv-later { opacity: .8; }
+.cv-cols-head, .cv-row { display: grid; grid-template-columns: 1fr 1fr; }
+.cv-cols-head > div { padding: 6px 12px; border-bottom: 1px solid var(--line); }
+.cv-cols-head > div + div, .cv-row > div + div { border-left: 1px solid var(--line); }
+.cv-body { overflow: auto; flex: 1; font-family: Calibri, Carlito, "Segoe UI", sans-serif; font-size: 11pt; line-height: 1.3; }
+.cv-line { padding: 1px 12px; min-height: 1.3em; overflow-wrap: anywhere; }
+.cv-line p { margin: 0; }
+.cv-changed { background: #fff6c2; }
+.cv-removed .cv-only, .cv-added .cv-only { background: #e3f6e3; }
+.cv-removed .cv-only { background: #fde4e1; }
+.cv-gap { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--line) 6px 7px); }
+mark.cv-del { background: #f8b4ad; text-decoration: line-through; color: inherit; }
+mark.cv-ins { background: #a7e3a7; color: inherit; }
+.cv-fold { width: 100%; border: none; border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); border-radius: 0; background: var(--bg); color: var(--muted); font-size: 12px; padding: 3px; }
+.conflict-banner { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 16px; background: #fff4d6; color: #4a3500; font-size: 13px; border-bottom: 1px solid var(--line); }
+@media (prefers-color-scheme: dark) {
+  .cv-head, .conflict-banner { background: #4a3d12; color: #f6e7b0; }
+  .cv-changed { background: #4a4413; } .cv-removed .cv-only { background: #4d2622; } .cv-added .cv-only { background: #1f4122; }
+  mark.cv-del { background: #8a3a33; } mark.cv-ins { background: #2e6b31; }
+}
+.conflict-dot { color: #b26a00; }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Editor } from './components/Editor';
 import { PromptHost, askText } from './components/Prompt';
+import { ConflictView } from './components/ConflictView';
 import { NoteList, DRAG_TYPE, type SortMode } from './components/NoteList';
 import { Settings } from './components/Settings';
 import { ImportDialog } from './components/ImportDialog';
@@ -37,14 +38,19 @@ function loadExpanded(): Set<string> {
 
 export default function App() {
   useSyncExternalStore(store.subscribe, store.getVersion);
-  const [view, setView] = useState<View>({ type: 'all' });
-  const [selected, setSelected] = useState<string | null>(null);
+  // Each device reopens the note (and folder/tag view) it had open last
+  const last = useMemo(() => { try { return JSON.parse(localStorage.getItem('pn.last') ?? 'null') as { note: string | null; view: View } | null; } catch { return null; } }, []);
+  const lastNoteOk = !!last?.note && !!store.state.notes.get(last.note) && !store.state.notes.get(last.note)!.deleted;
+  const [view, setView] = useState<View>(() => (last?.view && (last.view.type !== 'folder' || store.state.folders.has(last.view.id)) ? last.view : { type: 'all' }));
+  const [selected, setSelected] = useState<string | null>(lastNoteOk ? last!.note : null);
+  const [reviewing, setReviewing] = useState<{ id: string; index: number } | null>(null);
   const [query, setQuery] = useState('');
   const [sortMode, setSortModeState] = useState<SortMode>(() => (localStorage.getItem('pn.sortMode') as SortMode) || 'custom');
   const setSortMode = (m: SortMode) => { localStorage.setItem('pn.sortMode', m); setSortModeState(m); };
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [dropFolder, setDropFolder] = useState<string | null>(null);
-  const [pane, setPane] = useState<Pane>('list');
+  const [pane, setPane] = useState<Pane>(lastNoteOk ? 'note' : 'list');
+  useEffect(() => { try { localStorage.setItem('pn.last', JSON.stringify({ note: selected, view })); } catch { /* ignore */ } }, [selected, view]);
   const [expanded, setExpanded] = useState<Set<string>>(loadExpanded);
   const [errors, setErrors] = useState<string[]>([]);
   const [toast, setToast] = useState<string | null>(null);
@@ -72,6 +78,12 @@ export default function App() {
   const say = (m: string) => { setToast(m); setTimeout(() => setToast((t) => (t === m ? null : t)), 6000); };
 
   useEffect(() => onStatus(setSync), []);
+  // Fold old "(conflict copy)" notes back into their originals (on start and after each sync)
+  useEffect(() => {
+    if (!sync || sync.phase === 'syncing') return;
+    void store.mergeOldConflictCopies().then((n) => { if (n) say(`Merged ${n} duplicate conflict cop${n === 1 ? 'y' : 'ies'} back into the original notes.`); }).catch((e) => fail(`Merging conflict copies failed: ${errText(e)}`));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sync?.phase, sync?.lastSynced]);
   useEffect(() => {
     const h = (e: Event) => fail(String((e as CustomEvent).detail));
     window.addEventListener('pn-error', h);
@@ -118,6 +130,15 @@ export default function App() {
   }, [store.getVersion(), view, query]);
 
   const note = selected ? store.state.notes.get(selected) ?? null : null;
+  const conflictCount = note?.conflicts?.length ?? 0;
+  const realConflict = note?.conflicts?.findIndex((c) => !c.auto) ?? -1;
+  const [laterFor, setLaterFor] = useState<string | null>(null);
+  useEffect(() => {
+    if (note && realConflict >= 0 && laterFor !== note.id && (!reviewing || reviewing.id !== note.id)) setReviewing({ id: note.id, index: realConflict });
+    if (reviewing && (!note || reviewing.id !== note.id || !conflictCount)) setReviewing(null);
+    else if (reviewing && reviewing.index >= conflictCount) setReviewing({ id: reviewing.id, index: 0 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note?.id, conflictCount, realConflict]);
 
   // File / View menu (desktop) and keyboard shortcuts
   useEffect(() => {
@@ -299,7 +320,15 @@ export default function App() {
                 <button className="tb" title={layout.focus ? 'Exit full page (Esc)' : 'Full page view (Ctrl+Shift+F)'} onClick={() => setLayout({ focus: !layout.focus })}>{layout.focus ? '⤡' : '⤢'}</button>
                 <button onClick={() => { if (window.confirm('Move this note to Trash?')) void run('Deleting…', async () => { await store.updateNote(note.id, { deleted: true }); setSelected(null); setPane('list'); }); }}>Delete</button>
               </div>
-              <Editor note={note} onError={fail} showToolbar={layout.toolbar} textWidth={layout.width} onTextWidth={(w) => setLayout({ width: w })} onExport={() => void run('Saving note…', async () => { const p = await exportNote(note.id); if (p) say(`Saved ${p}`); })} />
+              {conflictCount > 0 && !reviewing && (
+                <div className="conflict-banner">⚠ {realConflict >= 0 ? `This note was changed in two places (${conflictCount})` : `${conflictCount} older version${conflictCount === 1 ? ' was' : 's were'} merged into this note automatically`}
+                  <button onClick={() => { setLaterFor(null); setReviewing({ id: note.id, index: realConflict >= 0 ? realConflict : 0 }); }}>Review side by side</button>
+                  {realConflict < 0 && <button onClick={() => void run('Dismissing…', async () => { for (let i = conflictCount - 1; i >= 0; i--) await store.dropConflict(note.id, i); })}>Dismiss</button>}
+                </div>
+              )}
+              {reviewing && reviewing.id === note.id && note.conflicts?.[reviewing.index]
+                ? <ConflictView note={note} index={reviewing.index} run={run} onDone={() => { setLaterFor(note.id); setReviewing(null); }} />
+                : <Editor note={note} onError={fail} showToolbar={layout.toolbar} textWidth={layout.width} onTextWidth={(w) => setLayout({ width: w })} onExport={() => void run('Saving note…', async () => { const p = await exportNote(note.id); if (p) say(`Saved ${p}`); })} />}
             </>
           )}
           {note && note.deleted && (

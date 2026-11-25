@@ -1,5 +1,6 @@
 import * as db from './db';
-import type { AttachmentMeta, Folder, Note } from './types';
+import type { AttachmentMeta, Folder, Note, NoteConflict } from './types';
+import { conflictFrom, copyBase, newer, sameContent } from './conflict';
 import { now, uid } from './util';
 
 // In-memory mirror of the local database. Every change is written to IndexedDB first, then
@@ -147,6 +148,58 @@ export async function placeNotes(moving: string[], list: Note[], index: number, 
       .filter((c) => moving.includes(c.id) || state.notes.get(c.id)!.sort !== c.patch.sort);
   }
   await updateNotes(changes);
+}
+
+// ---------- conflicts ----------
+// Review finished: drop the first conflict. Local only — nothing to upload.
+export async function dropConflict(id: string, index = 0) {
+  const n = state.notes.get(id);
+  if (!n) throw new Error(`Note ${id} not found`);
+  const conflicts = (n.conflicts ?? []).filter((_, i) => i !== index);
+  await saveLocal('notes', [{ ...n, conflicts }], true);
+}
+export async function useConflictVersion(id: string, index = 0) {
+  const n = state.notes.get(id)!;
+  const c = n.conflicts![index];
+  const conflicts = n.conflicts!.filter((_, i) => i !== index);
+  await saveLocal('notes', [{ ...n, title: c.title, html: c.html, conflicts, updated_at: now(), dirty: true }]);
+}
+export async function keepConflictAsCopy(id: string, index = 0) {
+  const n = state.notes.get(id)!;
+  const c = n.conflicts![index];
+  await createNote(n.folder_id, `${c.title || 'Untitled'} (other version)`, c.html, n.tags);
+  await dropConflict(id, index);
+}
+
+// Fold the separate "(conflict copy)" notes made by 1.0.0–1.0.5 back into their original note.
+// The newest version becomes the note; the other one is kept for review (as an auto-merged version).
+export async function mergeOldConflictCopies(): Promise<number> {
+  let merged = 0;
+  const live = liveNotes();
+  // oldest copies first so the newest version ends up on top
+  const copies = live.filter((n) => copyBase(n.title) !== null).sort((a, b) => (newer(a.updated_at, b.updated_at) ? 1 : -1));
+  for (const copy of copies) {
+    const base = copyBase(copy.title)!;
+    const orig = liveNotes().find((n) => n.id !== copy.id && n.folder_id === copy.folder_id && n.title === base);
+    if (!orig) continue;
+    const t = now();
+    const asOrigTitle = { ...copy, title: base };
+    const conflicts: NoteConflict[] = [...(orig.conflicts ?? [])];
+    let updated: Note;
+    if (sameContent(asOrigTitle, orig)) {
+      updated = orig; // identical: just remove the duplicate
+    } else if (newer(copy.updated_at, orig.updated_at)) {
+      conflicts.push({ ...conflictFrom(orig, 'older version (auto-merged)', true) });
+      updated = { ...orig, html: copy.html, updated_at: t, dirty: true };
+    } else {
+      conflicts.push({ ...conflictFrom(asOrigTitle, 'older version (auto-merged)', true) });
+      updated = orig;
+    }
+    await saveLocal('notes', [{ ...updated, conflicts }, { ...copy, deleted: true, pinned: null, updated_at: t, dirty: true }]);
+    merged++;
+  }
+  if (merged) await renumberPins();
+  return merged;
 }
 
 // ---------- attachments ----------

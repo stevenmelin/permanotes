@@ -5,6 +5,7 @@ import { onLocalChange, saveLocal, state } from './store';
 import type { AttachmentMeta, Folder, Note } from './types';
 import { errText, uid } from './util';
 import { DEFAULT_SYNC } from '../config';
+import { conflictFrom, decideNote, newer, normTime } from './conflict';
 
 export const BUCKET = 'attachments';
 export const TABLES = ['folders', 'notes', 'attachments'] as const;
@@ -181,8 +182,9 @@ async function pull(_userId: string, full = false) {
   for (const r of rf) {
     track(r);
     const l = state.folders.get(r.id);
-    if (!full && l?.dirty && l.updated_at > r.updated_at) continue; // local is newer; push will win
-    folders.push({ id: r.id, parent_id: (r.parent_id as string) ?? null, name: r.name as string, sort: (r.sort as number) ?? 0, updated_at: r.updated_at, deleted: !!r.deleted, dirty: false, synced_at: r.updated_at });
+    const ru = normTime(r.updated_at);
+    if (!full && l?.dirty && newer(l.updated_at, ru)) continue; // local is newer; push will win
+    folders.push({ id: r.id, parent_id: (r.parent_id as string) ?? null, name: r.name as string, sort: Number(r.sort ?? 0), updated_at: ru, deleted: !!r.deleted, dirty: false, synced_at: ru });
   }
   await saveLocal('folders', folders, true);
 
@@ -191,45 +193,37 @@ async function pull(_userId: string, full = false) {
   for (const r of ra) {
     track(r);
     const l = state.attachments.get(r.id);
-    if (!full && l?.dirty && l.updated_at > r.updated_at) continue;
-    atts.push({ id: r.id, note_id: (r.note_id as string) ?? null, name: r.name as string, mime: r.mime as string, size: Number(r.size ?? 0), created_at: r.created_at as string, updated_at: r.updated_at, deleted: !!r.deleted, dirty: false, synced_at: r.updated_at, has_blob: l?.has_blob ?? false });
+    const ru = normTime(r.updated_at);
+    if (!full && l?.dirty && newer(l.updated_at, ru)) continue;
+    atts.push({ id: r.id, note_id: (r.note_id as string) ?? null, name: r.name as string, mime: r.mime as string, size: Number(r.size ?? 0), created_at: normTime(r.created_at as string), updated_at: ru, deleted: !!r.deleted, dirty: false, synced_at: ru, has_blob: l?.has_blob ?? false });
   }
   await saveLocal('attachments', atts, true);
 
   const rn = await fetchSince('notes', query);
   const notes: Note[] = [];
-  const copies: Note[] = [];
+  let clashes = 0;
   for (const r of rn) {
     track(r);
-    const remote: Note = { id: r.id, folder_id: (r.folder_id as string) ?? null, title: (r.title as string) ?? '', html: (r.html as string) ?? '', tags: (r.tags as string[]) ?? [], sort: Number(r.sort ?? 0), pinned: r.pinned == null ? null : Number(r.pinned), created_at: r.created_at as string, updated_at: r.updated_at, deleted: !!r.deleted, dirty: false, synced_at: r.updated_at };
+    const ru = normTime(r.updated_at);
     const l = state.notes.get(r.id);
-    if (full) {
-      if (l?.dirty && !l.deleted && (l.html !== remote.html || l.title !== remote.title)) {
-        copies.push({ ...l, id: uid(), title: `${l.title || 'Untitled'} (this device)`, dirty: true, synced_at: null });
-      }
-      notes.push(remote);
-      continue;
-    }
-    if (l?.dirty && l.updated_at !== r.updated_at) {
-      if (r.updated_at === l.synced_at) continue; // server still has the version we started from; our edit wins on push
-      // Both sides changed since the last sync: keep both. The local edit becomes a copy.
-      if (!l.deleted && !remote.deleted && (l.html !== remote.html || l.title !== remote.title)) {
-        copies.push({ ...l, id: uid(), title: `${l.title || 'Untitled'} (conflict copy)`, dirty: true, synced_at: null });
-      } else if (l.updated_at > r.updated_at) {
-        continue;
-      }
+    const remote: Note = { id: r.id, folder_id: (r.folder_id as string) ?? null, title: (r.title as string) ?? '', html: (r.html as string) ?? '', tags: (r.tags as string[]) ?? [], sort: Number(r.sort ?? 0), pinned: r.pinned == null ? null : Number(r.pinned), created_at: normTime(r.created_at as string), updated_at: ru, deleted: !!r.deleted, dirty: false, synced_at: ru, conflicts: l?.conflicts };
+    const d = decideNote(l, remote, full);
+    if (d === 'skip') continue;
+    if (d === 'conflict' && l) {
+      // keep the other device's version as the note, and this device's edit for side-by-side review
+      remote.conflicts = [...(l.conflicts ?? []), conflictFrom(l, 'this device')];
+      clashes++;
     }
     notes.push(remote);
   }
   await saveLocal('notes', notes, true);
-  if (copies.length) await saveLocal('notes', copies);
   if (maxSeen !== since) await db.kvSet('lastPull', maxSeen);
-  if (full) setStatus({ message: `Matched your other devices: ${rn.length} notes, ${rf.length} folders.${copies.length ? ` ${copies.length} unsynced edit(s) from this device kept as "(this device)" copies.` : ''}` });
+  if (full) setStatus({ message: `Matched your other devices: ${rn.length} notes, ${rf.length} folders.${clashes ? ` ${clashes} note(s) had edits from this device that differ — open them to compare.` : ''}` });
 }
 
 // ---------- push ----------
 const strip = <T extends object>(o: T) => {
-  const { dirty: _d, synced_at: _s, has_blob: _h, ...rest } = o as T & { dirty?: unknown; synced_at?: unknown; has_blob?: unknown };
+  const { dirty: _d, synced_at: _s, has_blob: _h, conflicts: _c, ...rest } = o as T & { dirty?: unknown; synced_at?: unknown; has_blob?: unknown; conflicts?: unknown };
   return rest;
 };
 
