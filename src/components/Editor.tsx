@@ -8,7 +8,7 @@ import Highlight from '@tiptap/extension-highlight';
 import Image from '@tiptap/extension-image';
 import { Placeholder } from '@tiptap/extensions';
 import { AttachmentNode } from './AttachmentNode';
-import { Indent } from './Indent';
+import { Indent, indentLess, indentMore } from './Indent';
 import { askText } from './Prompt';
 import { getNoteZoom, onNoteZoom } from '../lib/viewprefs';
 import { rememberUrl, resolveHtml, unresolveHtml } from '../lib/attachments';
@@ -181,6 +181,8 @@ export function Editor({ note, onError, onExport, showToolbar, textWidth, onText
         {b('•', 'Bullet list', () => c().toggleBulletList().run(), editor.isActive('bulletList'))}
         {b('1.', 'Numbered list', () => c().toggleOrderedList().run(), editor.isActive('orderedList'))}
         {b('☑', 'Checklist', () => c().toggleTaskList().run(), editor.isActive('taskList'))}
+        {b('⇤', 'Outdent — move selected text back (Shift+Tab)', () => { editor.commands.focus(); indentLess(editor); })}
+        {b('⇥', 'Indent — move selected text in (Tab)', () => { editor.commands.focus(); indentMore(editor); })}
         {editor.isActive('bulletList') && (
           <select className="tbsel" title="Bullet style" value={(editor.getAttributes('bulletList').bullet as string) ?? 'disc'}
             onChange={(e) => c().updateAttributes('bulletList', { bullet: e.target.value === 'disc' ? null : e.target.value }).run()}>

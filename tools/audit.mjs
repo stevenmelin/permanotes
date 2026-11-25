@@ -90,6 +90,7 @@ for (const f of files.filter((f) => f.startsWith('src/') && /\.(ts|tsx)$/.test(f
 // 1.0.3: Tab/Shift+Tab indent must be registered and must not steal Tab from tables
 check(/\bIndent,/.test(r('src/components/Editor.tsx')) && /Tab:/.test(r('src/components/Indent.ts')) && /'Shift-Tab':/.test(r('src/components/Indent.ts')), 'Tab/Shift+Tab indent extension not registered in the editor');
 check((r('src/components/Indent.ts').match(/isActive\('table'\)\) return false/g) ?? []).length === 2, 'Indent must leave Tab/Shift+Tab to tables');
+check(/indentMore\(editor\)/.test(r('src/components/Editor.tsx')) && /indentLess\(editor\)/.test(r('src/components/Editor.tsx')), 'Indent/Outdent toolbar buttons missing');
 // toolbar must wrap (never hide buttons behind sideways scrolling)
 check(!/\.toolbar[^{]*\{[^}]*(flex-wrap:\s*nowrap|overflow-x:\s*auto)/.test(r('src/styles.css')), 'toolbar must wrap onto more rows, not scroll sideways');
 check(/syncToDevices/.test(r('src/App.tsx')) && /export async function syncToDevices/.test(r('src/lib/sync.ts')), 'Sync to Devices button not wired');
