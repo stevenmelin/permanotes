@@ -104,7 +104,7 @@ export async function moveNotesToFolder(ids: string[], folderId: string | null) 
 
 // The OneNote import (before 1.0.12) put every note in "Notebook / Section" folders. Those folders are
 // removed and their notes moved to the main list. Only folders made by the import qualify: created before
-// this version and holding nothing but OneNote pages — folders you make yourself are never touched.
+// this version and holding OneNote pages — folders you make yourself (from 1.0.12 on) are never touched.
 const IMPORT_FOLDER_CUTOFF = '2026-11-27T16:00:00.000Z';
 export async function flattenImportedFolders(): Promise<number> {
   const live = liveFolders();
@@ -114,7 +114,8 @@ export async function flattenImportedFolders(): Promise<number> {
     const subtree = ids.map((i) => state.folders.get(i)!).filter((f) => !f.deleted);
     if (subtree.some((f) => normIso(f.updated_at) >= IMPORT_FOLDER_CUTOFF)) continue;
     const notes = liveNotes().filter((n) => n.folder_id && ids.includes(n.folder_id));
-    if (!notes.length || notes.some((n) => !n.tags.includes('onenote'))) continue;
+    // a folder from the OneNote import holds OneNote pages (plus any notes you added to it later)
+    if (!notes.some((n) => n.tags.includes('onenote'))) continue;
     const t = now();
     await saveLocal('notes', notes.map((n) => ({ ...n, folder_id: null, updated_at: t, dirty: true })));
     await saveLocal('folders', subtree.map((f) => ({ ...f, deleted: true, updated_at: t, dirty: true })));

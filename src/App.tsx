@@ -361,7 +361,7 @@ export default function App() {
             snippet={(n) => noteText(n).slice(n.title.length + n.tags.join(' ').length + 2, n.title.length + 120)} />
         </section>}
         <section className="note">
-          {!narrow && (
+          {(desktop || !narrow || tabs.list.length > 1) && (
             <div className="tabs"
               onDragOver={(e) => { if (e.dataTransfer.types.includes(DRAG_TYPE)) e.preventDefault(); }}
               onDrop={(e) => { const ids = JSON.parse(e.dataTransfer.getData(DRAG_TYPE) || '[]') as string[]; if (ids.length) { e.preventDefault(); ids.forEach((id) => openInNewTab(id)); } }}>

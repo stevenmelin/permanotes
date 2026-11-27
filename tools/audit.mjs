@@ -231,6 +231,8 @@ check(/deleteFolder\(id: string, keepNotes/.test(store2) && /askChoice\(`Delete 
 check(/Add to folder/.test(nl) && /addToFolder/.test(app2), 'right-click › Add to folder missing');
 check(/const folder_id: string \| null = null;/.test(r('src/lib/onenoteImport.ts')), 'OneNote import must not create Notebook/Section folders any more');
 check(/IMPORT_FOLDER_CUTOFF/.test(store2), 'old OneNote import folders are never flattened');
+check(!/notes\.some\(\(n\) => !n\.tags\.includes\('onenote'\)\)\) continue/.test(store2), 'one non-OneNote note must not block removing the OneNote folders (1.0.12 bug)');
+check(/\(desktop \|\| !narrow/.test(app2), 'tabs must show in a narrow desktop window (1.0.12 hid them)');
 
 const rel = relative(process.cwd(), ROOT) || '.';
 if (problems.length) {
