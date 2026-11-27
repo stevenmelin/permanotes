@@ -207,12 +207,17 @@ check(/mergeOldConflictCopies/.test(r('src/App.tsx')), 'old conflict copies are 
 check(/pn\.last/.test(r('src/App.tsx')), 'last opened note is not remembered');
 
 // 1.0.8: reopen at the same scroll position (per device, per note)
-check(/ref=\{scroller\}[^>]*onScroll=/.test(r('src/components/Editor.tsx')) && /restoreScroll\(el, getScroll\(`note:/.test(r('src/components/Editor.tsx')), 'note scroll position is not saved/restored');
+check(/ref=\{scroller\}[\s\S]{0,1500}onScroll=\{/.test(r('src/components/Editor.tsx')) && /restoreScroll\(el, getScroll\(`note:/.test(r('src/components/Editor.tsx')), 'note scroll position is not saved/restored');
 check(/pagehide/.test(r('src/lib/scrollmem.ts')) && /visibilitychange/.test(r('src/lib/scrollmem.ts')), 'scroll position must be flushed when the app closes or goes to background (iPhone)');
 
 // 1.0.10: emoji fonts from OneNote leaked into the text typed after an emoji
 check(/EmojiFontCleanup,/.test(r('src/components/Editor.tsx')), 'emoji font cleanup is not registered in the editor');
 check(/emoji\|segoe ui symbol/i.test(r('src/lib/onenote.ts')), 'OneNote importer must drop emoji-only fonts');
+
+// 1.0.11: adjacent same-style lists must join so numbering continues after deleting a line
+check(/ListJoin,/.test(r('src/components/Editor.tsx')), 'list joining (continuous numbering) is not registered in the editor');
+check(/sameList[\s\S]*b\.attrs\.split/.test(r('src/components/ListJoin.ts')) && /addGlobalAttributes/.test(r('src/components/ListJoin.ts')), 'split lists must be kept apart by the auto-join (data-split attribute on every list type)');
+check(/splitListHere\(editor\)/.test(r('src/components/Editor.tsx')) && /onContextMenu=/.test(r('src/components/Editor.tsx')), 'Split list is missing from the toolbar or the right-click menu');
 
 const rel = relative(process.cwd(), ROOT) || '.';
 if (problems.length) {

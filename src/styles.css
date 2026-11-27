@@ -181,3 +181,9 @@ mark.cv-ins { background: #a7e3a7; color: inherit; }
   mark.cv-del { background: #8a3a33; } mark.cv-ins { background: #2e6b31; }
 }
 .conflict-dot { color: #b26a00; }
+/* right-click menu in lists */
+.ctx-back { position: fixed; inset: 0; z-index: 60; }
+.ctx-menu { position: fixed; min-width: 210px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.18); padding: 4px; display: flex; flex-direction: column; }
+.ctx-menu button { border: none; text-align: left; padding: 6px 10px; border-radius: 4px; background: transparent; }
+.ctx-menu button:hover { background: var(--accent-soft); }
+.ctx-menu hr { border: none; border-top: 1px solid var(--line); margin: 4px 0; }

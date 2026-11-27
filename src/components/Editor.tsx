@@ -10,6 +10,9 @@ import { Placeholder } from '@tiptap/extensions';
 import { AttachmentNode } from './AttachmentNode';
 import { Indent, indentLess, indentMore } from './Indent';
 import { EmojiFontCleanup } from './EmojiFont';
+import { ListJoin, canJoinListAbove, canSplitList, joinListAbove, splitListHere } from './ListJoin';
+import { TextSelection } from '@tiptap/pm/state';
+import { isDesktop } from '../lib/platform';
 import { askText } from './Prompt';
 import { getNoteZoom, onNoteZoom } from '../lib/viewprefs';
 import { getScroll, restoreScroll, saveScroll } from '../lib/scrollmem';
@@ -45,6 +48,7 @@ export const editorExtensions = [
   AttachmentNode,
   Indent,
   EmojiFontCleanup,
+  ListJoin,
   Placeholder.configure({ placeholder: 'Start writing…' }),
 ];
 
@@ -84,6 +88,7 @@ export function Editor({ note, onError, onExport, showToolbar, textWidth, onText
   const [title, setTitle] = useState(note.title);
   const [tags, setTags] = useState(note.tags.join(', '));
   const [loadIssues, setLoadIssues] = useState<string[]>([]);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [noteZoom, setNoteZoomState] = useState(getNoteZoom);
   useEffect(() => onNoteZoom(setNoteZoomState), []);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -193,6 +198,8 @@ export function Editor({ note, onError, onExport, showToolbar, textWidth, onText
         {b('•', 'Bullet list', () => c().toggleBulletList().run(), editor.isActive('bulletList'))}
         {b('1.', 'Numbered list', () => c().toggleOrderedList().run(), editor.isActive('orderedList'))}
         {b('☑', 'Checklist', () => c().toggleTaskList().run(), editor.isActive('taskList'))}
+        {canSplitList(editor) && b('✂ Split list', 'Split list here — this line starts a new, separate list (numbering restarts at 1)', () => { editor.commands.focus(); splitListHere(editor); })}
+        {canJoinListAbove(editor) && b('⤒ Join lists', 'Join this list with the list above (numbering continues)', () => { editor.commands.focus(); joinListAbove(editor); })}
         {b('⇤', 'Outdent — move selected text back (Shift+Tab)', () => { editor.commands.focus(); indentLess(editor); })}
         {b('⇥', 'Indent — move selected text in (Tab)', () => { editor.commands.focus(); indentMore(editor); })}
         {editor.isActive('bulletList') && (
@@ -251,7 +258,31 @@ export function Editor({ note, onError, onExport, showToolbar, textWidth, onText
         <button className="tb" title="Save this note as a .pn file" onClick={onExport}>Save .pn</button>
       </div>}
       {loadIssues.length > 0 && <div className="warn">Some attachments couldn't be loaded: {loadIssues.join(' · ')}</div>}
-      <div className="content" ref={scroller} onScroll={(e) => { if (!restoring.current) saveScroll(`note:${noteId.current}`, (e.target as HTMLElement).scrollTop); }}>
+      {ctxMenu && (
+        <div className="ctx-back" onClick={() => setCtxMenu(null)} onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }}>
+          <div className="ctx-menu" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={(e) => e.stopPropagation()}>
+            {canSplitList(editor) && <button onClick={() => { setCtxMenu(null); editor.commands.focus(); splitListHere(editor); }}>✂ Split list here</button>}
+            {canJoinListAbove(editor) && <button onClick={() => { setCtxMenu(null); editor.commands.focus(); joinListAbove(editor); }}>⤒ Join with list above</button>}
+            <hr />
+            <button onClick={() => { setCtxMenu(null); editor.commands.focus(); document.execCommand('cut'); }}>Cut</button>
+            <button onClick={() => { setCtxMenu(null); editor.commands.focus(); document.execCommand('copy'); }}>Copy</button>
+            {isDesktop && <button onClick={() => { setCtxMenu(null); editor.commands.focus(); document.execCommand('paste'); }}>Paste</button>}
+            <button onClick={() => { setCtxMenu(null); indentMore(editor); }}>⇥ Indent</button>
+            <button onClick={() => { setCtxMenu(null); indentLess(editor); }}>⇤ Outdent</button>
+          </div>
+        </div>
+      )}
+      <div className="content" ref={scroller}
+        onContextMenu={(e) => {
+          // In a list: our menu (with Split / Join). Elsewhere: the normal right-click menu (spelling, cut, copy, paste).
+          const hit = editor.view.posAtCoords({ left: e.clientX, top: e.clientY });
+          if (!hit) return;
+          const { from, to } = editor.state.selection;
+          if (hit.pos < from || hit.pos > to) editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, hit.pos)));
+          if (!canSplitList(editor) && !canJoinListAbove(editor)) return;
+          e.preventDefault();
+          setCtxMenu({ x: Math.min(e.clientX, window.innerWidth - 230), y: Math.min(e.clientY, window.innerHeight - 260) });
+        }} onScroll={(e) => { if (!restoring.current) saveScroll(`note:${noteId.current}`, (e.target as HTMLElement).scrollTop); }}>
         <div className="page" style={textWidth ? { width: textWidth } : undefined}>
           <div className="note-zoom" style={{ zoom: noteZoom }}><EditorContent editor={editor} /></div>
           <div className="width-handle" title="Drag to make the text narrower or wider. Double-click to fill the window."
