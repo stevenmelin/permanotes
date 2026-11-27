@@ -6,7 +6,7 @@ import { load } from './lib/store';
 import { requestPersistence } from './lib/db';
 import { startSync, onStatus } from './lib/sync';
 import { dailyBackup } from './lib/pnio';
-import { desktop } from './lib/platform';
+import { desktop, SOLO_NOTE } from './lib/platform';
 import { errText } from './lib/util';
 import { installPinchToTextSize } from './lib/viewprefs';
 
@@ -27,6 +27,8 @@ async function boot() {
   await requestPersistence();
   await load();
   createRoot(root).render(<StrictMode><App /></StrictMode>);
+  // note windows leave syncing and backups to the main window (their edits reach it instantly)
+  if (SOLO_NOTE) return;
   await startSync();
   if (desktop) {
     const backup = async () => {

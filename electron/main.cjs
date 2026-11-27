@@ -89,7 +89,7 @@ function savePrefs() {
 const ZOOM_MIN = 0.3, ZOOM_MAX = 3;
 function setZoom(z) {
   prefs.zoom = Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)) * 100) / 100;
-  if (win) win.webContents.setZoomFactor(prefs.zoom);
+  for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.setZoomFactor(prefs.zoom);
   savePrefs();
 }
 ipcMain.on('pn:zoom-wheel', (_e, deltaY) => {
@@ -104,7 +104,7 @@ function boundsVisible(b) {
 }
 
 // ---------- application menu ----------
-const send = (id) => () => { if (win) win.webContents.send('pn:menu', id); };
+const send = (id) => () => { const w = BrowserWindow.getFocusedWindow() ?? win; if (w && !w.isDestroyed()) w.webContents.send('pn:menu', id); };
 function buildMenu() {
   const mac = process.platform === 'darwin';
   const template = [
@@ -148,7 +148,20 @@ function buildMenu() {
         { role: 'reload' }, { role: 'toggleDevTools' },
       ],
     },
-    { role: 'windowMenu' },
+    {
+      label: 'Window',
+      submenu: [
+        { label: 'New Tab', accelerator: 'CmdOrCtrl+T', click: send('new-tab') },
+        { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: send('close-tab') },
+        { label: 'Next Tab', accelerator: 'Ctrl+Tab', click: send('next-tab') },
+        { label: 'Previous Tab', accelerator: 'Ctrl+Shift+Tab', click: send('prev-tab') },
+        { type: 'separator' },
+        { label: 'Open Note in New Window', accelerator: 'CmdOrCtrl+Shift+O', click: send('note-window') },
+        { type: 'separator' },
+        { role: 'minimize' },
+        { label: 'Close Window', accelerator: 'CmdOrCtrl+Shift+W', role: 'close' },
+      ],
+    },
     {
       role: 'help',
       submenu: [
@@ -161,6 +174,30 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+// Behaviour every PermaNotes window shares (main window and side-by-side note windows)
+function setupWindow(w) {
+  w.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^(https?:|mailto:)/i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  w.webContents.on('will-navigate', (e, url) => {
+    if (!url.startsWith('app://')) { e.preventDefault(); if (/^(https?:|mailto:)/i.test(url)) shell.openExternal(url); }
+  });
+  w.webContents.on('render-process-gone', (_e, d) => dialog.showErrorBox('PermaNotes', `The window crashed (${d.reason}, exit code ${d.exitCode}). Your notes are saved locally; restart PermaNotes.`));
+  w.webContents.on('did-fail-load', (_e, code, desc, url) => dialog.showErrorBox('PermaNotes', `Failed to load ${url}: ${desc} (${code})`));
+  w.webContents.on('context-menu', (_e, params) => {
+    const items = [];
+    for (const s of params.dictionarySuggestions || []) items.push({ label: s, click: () => w.webContents.replaceMisspelling(s) });
+    if (items.length) items.push({ type: 'separator' });
+    items.push({ role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' });
+    Menu.buildFromTemplate(items).popup();
+  });
+  // zoom is re-applied on every page load (it does not stick to app:// on its own)
+  w.webContents.on('did-finish-load', () => w.webContents.setZoomFactor(prefs.zoom));
+  w.webContents.setVisualZoomLevelLimits(1, 1); // trackpad pinch goes through our own zoom instead
+}
+const webPreferences = () => ({ preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, spellcheck: true });
+
 function createWindow() {
   buildMenu();
   loadPrefs();
@@ -169,29 +206,11 @@ function createWindow() {
     ...b, minWidth: 160, minHeight: 120,
     title: 'PermaNotes',
     icon: path.join(__dirname, '..', 'build', 'icon.png'),
-    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, spellcheck: true },
+    webPreferences: webPreferences(),
   });
   win.webContents.on('did-start-loading', () => { rendererReady = false; });
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^(https?:|mailto:)/i.test(url)) shell.openExternal(url);
-    return { action: 'deny' };
-  });
-  win.webContents.on('will-navigate', (e, url) => {
-    if (!url.startsWith('app://')) { e.preventDefault(); if (/^(https?:|mailto:)/i.test(url)) shell.openExternal(url); }
-  });
-  win.webContents.on('render-process-gone', (_e, d) => dialog.showErrorBox('PermaNotes', `The window crashed (${d.reason}, exit code ${d.exitCode}). Your notes are saved locally; restart PermaNotes.`));
-  win.webContents.on('did-fail-load', (_e, code, desc, url) => dialog.showErrorBox('PermaNotes', `Failed to load ${url}: ${desc} (${code})`));
-  win.webContents.on('context-menu', (_e, params) => {
-    const items = [];
-    for (const s of params.dictionarySuggestions || []) items.push({ label: s, click: () => win.webContents.replaceMisspelling(s) });
-    if (items.length) items.push({ type: 'separator' });
-    items.push({ role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' });
-    Menu.buildFromTemplate(items).popup();
-  });
+  setupWindow(win);
   if (prefs.maximized) win.maximize();
-  // zoom is re-applied on every page load (it does not stick to app:// on its own)
-  win.webContents.on('did-finish-load', () => win.webContents.setZoomFactor(prefs.zoom));
-  win.webContents.setVisualZoomLevelLimits(1, 1); // trackpad pinch goes through our own zoom instead
   const remember = () => {
     if (!win || win.isDestroyed()) return;
     prefs.maximized = win.isMaximized();
@@ -202,8 +221,27 @@ function createWindow() {
   win.on('resize', later);
   win.on('move', later);
   win.on('close', () => { remember(); savePrefs(); });
+  // the main window does the syncing, so closing it closes PermaNotes (and any note windows)
+  win.on('closed', () => { win = null; app.quit(); });
   win.loadURL('app://permanotes/index.html');
 }
+
+// A second window showing one note, e.g. to place two notes side by side
+function createNoteWindow(noteId, x, y) {
+  const width = 720, height = 820;
+  const opts = { width, height, minWidth: 160, minHeight: 120, title: 'PermaNotes', icon: path.join(__dirname, '..', 'build', 'icon.png'), webPreferences: webPreferences() };
+  if (Number.isFinite(x) && Number.isFinite(y) && (x !== 0 || y !== 0)) {
+    const area = screen.getDisplayNearestPoint({ x: Math.round(x), y: Math.round(y) }).workArea;
+    opts.x = Math.max(area.x, Math.min(Math.round(x) - 60, area.x + area.width - width));
+    opts.y = Math.max(area.y, Math.min(Math.round(y) - 20, area.y + area.height - Math.min(height, area.height)));
+    opts.height = Math.min(height, area.height);
+  }
+  const w = new BrowserWindow(opts);
+  setupWindow(w);
+  w.loadURL(`app://permanotes/index.html?note=${encodeURIComponent(noteId)}`);
+  return w;
+}
+ipcMain.handle('pn:open-note-window', (_e, noteId, x, y) => { createNoteWindow(String(noteId), Number(x), Number(y)); });
 
 // ---------- IPC ----------
 const backupDir = () => path.join(app.getPath('documents'), 'PermaNotes Backups');

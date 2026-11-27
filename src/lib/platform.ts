@@ -10,6 +10,7 @@ export interface DesktopBridge {
   showBackupFolder(): Promise<void>;
   version(): Promise<string>;
   onMenu(cb: (id: string) => void): void;
+  openNoteWindow(noteId: string, screenX: number, screenY: number): Promise<void>;
 }
 
 declare global { interface Window { permanotes?: DesktopBridge } }
@@ -17,6 +18,8 @@ declare global { interface Window { permanotes?: DesktopBridge } }
 export const desktop: DesktopBridge | undefined = typeof window !== 'undefined' ? window.permanotes : undefined;
 export const isDesktop = !!desktop;
 export const APP_VERSION = __APP_VERSION__;
+// Set when this window was opened to show one note (dragged out of the main window)
+export const SOLO_NOTE: string | null = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('note') : null;
 
 export async function saveBytes(name: string, bytes: Uint8Array, mime = 'application/octet-stream'): Promise<string | null> {
   if (desktop) return desktop.saveFile(name, bytes);

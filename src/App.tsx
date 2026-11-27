@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Editor } from './components/Editor';
-import { PromptHost, askText } from './components/Prompt';
+import { PromptHost, askChoice, askText } from './components/Prompt';
 import { ConflictView } from './components/ConflictView';
 import { NoteList, DRAG_TYPE, type SortMode } from './components/NoteList';
 import { Settings } from './components/Settings';
@@ -8,7 +8,7 @@ import { ImportDialog } from './components/ImportDialog';
 import * as store from './lib/store';
 import { exportFolder, exportLibrary, exportNote, importPn } from './lib/pnio';
 import { onStatus, type SyncStatus } from './lib/sync';
-import { desktop, pickFiles } from './lib/platform';
+import { desktop, pickFiles, SOLO_NOTE } from './lib/platform';
 import { syncToDevices } from './lib/sync';
 import type { Folder, Note } from './lib/types';
 import { errText, stripHtml } from './lib/util';
@@ -42,7 +42,27 @@ export default function App() {
   const last = useMemo(() => { try { return JSON.parse(localStorage.getItem('pn.last') ?? 'null') as { note: string | null; view: View } | null; } catch { return null; } }, []);
   const lastNoteOk = !!last?.note && !!store.state.notes.get(last.note) && !store.state.notes.get(last.note)!.deleted;
   const [view, setView] = useState<View>(() => (last?.view && (last.view.type !== 'folder' || store.state.folders.has(last.view.id)) ? last.view : { type: 'all' }));
-  const [selected, setSelected] = useState<string | null>(lastNoteOk ? last!.note : null);
+  // Tabs (like File Explorer). Each tab shows one note; the main window remembers its tabs.
+  const [tabs, setTabs] = useState<{ list: (string | null)[]; active: number }>(() => {
+    if (SOLO_NOTE) return { list: [SOLO_NOTE], active: 0 };
+    try {
+      const t = JSON.parse(localStorage.getItem('pn.tabs') ?? 'null') as { list: (string | null)[]; active: number } | null;
+      if (t?.list?.length) {
+        const list = t.list.map((id) => (id && store.state.notes.get(id) && !store.state.notes.get(id)!.deleted ? id : null));
+        return { list, active: Math.max(0, Math.min(t.active ?? 0, list.length - 1)) };
+      }
+    } catch { /* fall through */ }
+    return { list: [lastNoteOk ? last!.note : null], active: 0 };
+  });
+  useEffect(() => { if (!SOLO_NOTE) try { localStorage.setItem('pn.tabs', JSON.stringify(tabs)); } catch { /* ignore */ } }, [tabs]);
+  const selected = tabs.list[tabs.active] ?? null;
+  const setSelected = (id: string | null) => setTabs((t) => ({ ...t, list: t.list.map((x, i) => (i === t.active ? id : x)) }));
+  const openInNewTab = (id: string | null) => setTabs((t) => ({ list: [...t.list, id], active: t.list.length }));
+  const closeTab = (i: number) => setTabs((t) => {
+    if (t.list.length === 1) return { list: [null], active: 0 };
+    const list = t.list.filter((_, k) => k !== i);
+    return { list, active: i < t.active ? t.active - 1 : Math.min(t.active, list.length - 1) };
+  });
   const [reviewing, setReviewing] = useState<{ id: string; index: number } | null>(null);
   const [query, setQuery] = useState('');
   const [sortMode, setSortModeState] = useState<SortMode>(() => (localStorage.getItem('pn.sortMode') as SortMode) || 'custom');
@@ -50,7 +70,7 @@ export default function App() {
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [dropFolder, setDropFolder] = useState<string | null>(null);
   const [pane, setPane] = useState<Pane>(lastNoteOk ? 'note' : 'list');
-  useEffect(() => { try { localStorage.setItem('pn.last', JSON.stringify({ note: selected, view })); } catch { /* ignore */ } }, [selected, view]);
+  useEffect(() => { if (!SOLO_NOTE) try { localStorage.setItem('pn.last', JSON.stringify({ note: selected, view })); } catch { /* ignore */ } }, [selected, view]);
   const [expanded, setExpanded] = useState<Set<string>>(loadExpanded);
   const [errors, setErrors] = useState<string[]>([]);
   const [toast, setToast] = useState<string | null>(null);
@@ -59,8 +79,9 @@ export default function App() {
   const [showImport, setShowImport] = useState(false);
   const [menuCmd, setMenuCmd] = useState<{ id: string; n: number } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [layout, setLayoutState] = useState<Layout>(loadLayout);
-  const setLayout = (p: Partial<Layout>) => setLayoutState((l) => { const n = { ...l, ...p }; localStorage.setItem('pn.layout', JSON.stringify(n)); return n; });
+  // a note window (dragged out of the main window) shows just the note and doesn't change the main window's layout
+  const [layout, setLayoutState] = useState<Layout>(() => (SOLO_NOTE ? { ...loadLayout(), folders: false, list: false, focus: false } : loadLayout()));
+  const setLayout = (p: Partial<Layout>) => setLayoutState((l) => { const n = { ...l, ...p }; if (!SOLO_NOTE) localStorage.setItem('pn.layout', JSON.stringify(n)); return n; });
   // One-pane-at-a-time layout: iPhone, or a desktop window squeezed very narrow
   const NARROW_Q = `(max-width: ${desktop ? 480 : 760}px)`;
   const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW_Q).matches);
@@ -81,6 +102,7 @@ export default function App() {
   // Fold old "(conflict copy)" notes back into their originals (on start and after each sync)
   useEffect(() => {
     if (!sync || sync.phase === 'syncing') return;
+    if (!SOLO_NOTE) void store.flattenImportedFolders().then((n) => { if (n) { say(`Moved ${n} notes out of the OneNote notebook folders into your main list.`); setView((v) => (v.type === 'folder' && !store.state.folders.get(v.id)?.deleted ? v : { type: 'all' })); } }).catch((e) => fail(`Tidying OneNote folders failed: ${errText(e)}`));
     void store.mergeOldConflictCopies().then((n) => { if (n) say(`Merged ${n} duplicate conflict cop${n === 1 ? 'y' : 'ies'} back into the original notes.`); }).catch((e) => fail(`Merging conflict copies failed: ${errText(e)}`));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sync?.phase, sync?.lastSynced]);
@@ -180,13 +202,43 @@ export default function App() {
     });
   };
 
+  const deleteFolderAsk = async (f: Folder) => {
+    const count = store.liveNotes().filter((n) => n.folder_id && store.descendantFolderIds(f.id).includes(n.folder_id)).length;
+    const c = await askChoice(`Delete the folder "${f.name}"? It has ${count} note${count === 1 ? '' : 's'}.`, [
+      { label: `Delete folder, keep the ${count} note${count === 1 ? '' : 's'} (they go back to All notes)` },
+      { label: `Delete folder AND its ${count} note${count === 1 ? '' : 's'} (they go to Trash)`, danger: true },
+    ]);
+    if (c === null) return;
+    await run('Deleting folder…', async () => {
+      await store.deleteFolder(f.id, c === 0);
+      if (view.type === 'folder' && store.descendantFolderIds(f.id).includes(view.id)) setView({ type: 'all' });
+      say(c === 0 ? `Folder deleted. ${count} note(s) kept.` : `Folder deleted. ${count} note(s) moved to Trash.`);
+    });
+  };
+
+  // Right-click › Add to folder: pick an existing folder or make a new one
+  const addToFolder = async (ids: string[]) => {
+    const fs = store.liveFolders().map((f) => ({ f, p: store.folderPath(f.id) })).sort((a, b) => a.p.localeCompare(b.p));
+    const c = await askChoice(`Add ${ids.length} note${ids.length === 1 ? '' : 's'} to which folder?`, [{ label: '＋ New folder…' }, ...fs.map(({ p }) => ({ label: `📁 ${p}` }))]);
+    if (c === null) return;
+    let target: Folder | undefined = fs[c - 1]?.f;
+    if (c === 0) {
+      const name = await askText('New folder name');
+      if (!name?.trim()) return;
+      target = await store.createFolder(name.trim(), null);
+    }
+    if (!target) return;
+    const t = target;
+    await run('Adding to folder…', async () => { await store.moveNotesToFolder(ids, t.id); say(`Added ${ids.length} note(s) to ${t.name}`); });
+  };
+
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const folderActions = (f: Folder) => (
     <div className="folder-menu" onClick={(e) => e.stopPropagation()}>
       <button onClick={() => { setMenuFor(null); void newFolder(f.id); }}>New subfolder</button>
       <button onClick={() => { setMenuFor(null); void askText('Rename folder', f.name).then((n) => { if (n?.trim()) void run('Renaming…', () => store.updateFolder(f.id, { name: n.trim() })); }); }}>Rename</button>
       <button onClick={() => { setMenuFor(null); void run('Saving folder…', async () => { const p = await exportFolder(f.id); if (p) say(`Saved ${p}`); }); }}>Save folder as .pn</button>
-      <button className="danger" onClick={() => { setMenuFor(null); if (window.confirm(`Delete "${f.name}" and move all its notes to Trash?`)) void run('Deleting…', async () => { await store.deleteFolder(f.id); setView({ type: 'all' }); }); }}>Delete folder</button>
+      <button className="danger" onClick={() => { setMenuFor(null); void deleteFolderAsk(f); }}>Delete folder</button>
     </div>
   );
 
@@ -210,6 +262,11 @@ export default function App() {
       case 'toggle-focus': setLayout({ focus: !layout.focus }); break;
       case 'exit-focus': setLayout({ focus: false }); break;
       case 'reset-width': setLayout({ width: null }); break;
+      case 'new-tab': openInNewTab(null); break;
+      case 'close-tab': closeTab(tabs.active); break;
+      case 'next-tab': setTabs((t) => ({ ...t, active: (t.active + 1) % t.list.length })); break;
+      case 'prev-tab': setTabs((t) => ({ ...t, active: (t.active - 1 + t.list.length) % t.list.length })); break;
+      case 'note-window': if (cur && desktop) void desktop.openNoteWindow(cur.id, 0, 0).catch((e) => fail(errText(e))); else fail('Open a note first.'); break;
       default: fail(`Unknown menu command: ${menuCmd.id}`);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -260,9 +317,9 @@ export default function App() {
         <button className="only-mobile" onClick={() => setPane(pane === 'note' ? 'list' : 'nav')}>{pane === 'note' ? '‹ Notes' : '☰'}</button>
         <strong className="brand">PermaNotes</strong>
         <span className="spacer" />
-        {syncBadge}
+        {!SOLO_NOTE && <>{syncBadge}
         <button onClick={() => setShowImport(true)}>Import</button>
-        <button onClick={() => void run('Saving library…', async () => { const p = await exportLibrary(); if (p) say(`Saved ${p}`); })}>Save all .pn</button>
+        <button onClick={() => void run('Saving library…', async () => { const p = await exportLibrary(); if (p) say(`Saved ${p}`); })}>Save all .pn</button></>}
         <button onClick={() => setShowSettings(true)}>⚙</button>
       </header>}
       {errors.length > 0 && (
@@ -278,7 +335,7 @@ export default function App() {
           <div className={view.type === 'all' ? 'nav-item active' : 'nav-item'} onClick={() => { setView({ type: 'all' }); setPane('list'); }}>🗂 All notes <span className="count">{store.liveNotes().length}</span></div>
           <div className="nav-head">Folders <button className="mini" title="New folder" onClick={() => void newFolder(null)}>＋</button></div>
           {childrenOf(null).map((f) => renderFolder(f, 0))}
-          {folders.length === 0 && <div className="hint">No folders yet. Click ＋ or import your OneNote notes.</div>}
+          {folders.length === 0 && <div className="hint">No folders yet. Click ＋ to make one, then drag notes onto it — or select notes, right-click › Add to folder.</div>}
           <div className="nav-head">Tags</div>
           {store.allTags().map((t) => (
             <div key={t} className={view.type === 'tag' && view.tag === t ? 'nav-item active' : 'nav-item'} onClick={() => { setView({ type: 'tag', tag: t }); setPane('list'); }}># {t}</div>
@@ -297,9 +354,32 @@ export default function App() {
           <NoteList notes={list} showFolder={view.type !== 'folder'} trash={view.type === 'trash'} openId={selected}
             selection={selection} setSelection={setSelection} onOpen={(id) => { setSelected(id); setPane('note'); }}
             sortMode={sortMode} setSortMode={setSortMode} run={run}
+            onOpenNewTab={(id) => { openInNewTab(id); setPane('note'); }}
+            onOpenWindow={desktop ? (id, x, y) => void desktop!.openNoteWindow(id, x, y).catch((e) => fail(`Opening a new window failed: ${errText(e)}`)) : undefined}
+            onAddToFolder={(ids) => void addToFolder(ids)}
+            onTrash={(ids) => { if (window.confirm(`Move ${ids.length} note${ids.length === 1 ? '' : 's'} to Trash?`)) void run('Deleting…', async () => { await store.updateNotes(ids.map((id) => ({ id, patch: { deleted: true, pinned: null } }))); await store.renumberPins(); }); }}
             snippet={(n) => noteText(n).slice(n.title.length + n.tags.join(' ').length + 2, n.title.length + 120)} />
         </section>}
         <section className="note">
+          {!narrow && (
+            <div className="tabs"
+              onDragOver={(e) => { if (e.dataTransfer.types.includes(DRAG_TYPE)) e.preventDefault(); }}
+              onDrop={(e) => { const ids = JSON.parse(e.dataTransfer.getData(DRAG_TYPE) || '[]') as string[]; if (ids.length) { e.preventDefault(); ids.forEach((id) => openInNewTab(id)); } }}>
+              {tabs.list.map((id, i) => {
+                const n = id ? store.state.notes.get(id) : undefined;
+                return (
+                  <div key={i} className={`tab${i === tabs.active ? ' on' : ''}`} title={n?.title || 'New tab'}
+                    onClick={() => setTabs((t) => ({ ...t, active: i }))}
+                    onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
+                    onAuxClick={(e) => { if (e.button === 1) closeTab(i); }}>
+                    <span className="tab-title">{n ? (n.title || 'Untitled') : 'New tab'}</span>
+                    <button className="tab-x" title="Close tab (Ctrl+W)" onClick={(e) => { e.stopPropagation(); closeTab(i); }}>×</button>
+                  </div>
+                );
+              })}
+              <button className="tab-new" title="New tab (Ctrl+T) — or middle-click a note" onClick={() => openInNewTab(null)}>＋</button>
+            </div>
+          )}
           {note && !note.deleted && (
             <>
               <div className="note-bar">
@@ -311,7 +391,7 @@ export default function App() {
                   <button className={layout.toolbar ? 'tb on' : 'tb'} title="Show/hide formatting toolbar (Ctrl+3)" onClick={() => setLayout({ toolbar: !layout.toolbar })}>Aa</button>
                 </span>
                 <select value={note.folder_id ?? ''} onChange={(e) => void run('Moving…', () => store.updateNote(note.id, { folder_id: e.target.value || null }))}>
-                  <option value="">(No folder)</option>
+                  <option value="">No folder</option>
                   {folders.map((f) => ({ f, p: store.folderPath(f.id) })).sort((a, b) => a.p.localeCompare(b.p)).map(({ f, p }) => <option key={f.id} value={f.id}>{p}</option>)}
                 </select>
                 <span className="spacer" />
@@ -337,7 +417,7 @@ export default function App() {
               <button onClick={() => void run('Restoring…', () => store.updateNote(note.id, { deleted: false }))}>Restore note</button>
             </div>
           )}
-          {!note && <div className="empty"><p>Select a note, or create a new one.</p>{layout.focus && <button onClick={() => setLayout({ focus: false })}>Exit full page</button>}{!layout.focus && (!layout.folders || !layout.list) && <button onClick={() => setLayout({ folders: true, list: true })}>Show folders and notes</button>}</div>}
+          {!note && <div className="empty"><p>{tabs.list.length > 1 ? 'New tab — click a note in the list to open it here.' : 'Select a note, or create a new one.'}</p>{layout.focus && <button onClick={() => setLayout({ focus: false })}>Exit full page</button>}{!layout.focus && (!layout.folders || !layout.list) && <button onClick={() => setLayout({ folders: true, list: true })}>Show folders and notes</button>}</div>}
         </section>
       </main>
       <PromptHost />

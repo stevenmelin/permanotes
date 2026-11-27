@@ -18,6 +18,10 @@ interface Props {
   setSortMode: (m: SortMode) => void;
   snippet: (n: Note) => string;
   run: (label: string, fn: () => Promise<unknown>) => Promise<void>;
+  onOpenNewTab: (id: string) => void;
+  onOpenWindow?: (id: string, screenX: number, screenY: number) => void; // desktop only
+  onAddToFolder: (ids: string[]) => void; // asks which folder
+  onTrash: (ids: string[]) => void;
 }
 
 type Drop = { zone: 'pinned' | 'rest'; index: number } | null;
@@ -37,6 +41,7 @@ export function NoteList(p: Props) {
   const ordered = useMemo(() => [...pinned, ...rest], [pinned, rest]);
   const anchor = useRef<string | null>(null);
   const [drop, setDrop] = useState<Drop>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; ids: string[] } | null>(null);
   const dragging = useRef<string[]>([]);
   const listEl = useRef<HTMLDivElement>(null);
   useEffect(() => { if (listEl.current) restoreScroll(listEl.current, getScroll('list')); }, []);
@@ -127,7 +132,23 @@ export function NoteList(p: Props) {
       <div className={`note-item${n.id === p.openId ? ' active' : ''}${p.selection.has(n.id) ? ' selected' : ''}`}
         draggable={!p.trash}
         onDragStart={(e) => onDragStart(e, n.id)}
-        onDragEnd={() => { setDrop(null); dragging.current = []; }}
+        onDragEnd={(e) => {
+          const ids = dragging.current;
+          setDrop(null); dragging.current = [];
+          // dropped outside the PermaNotes window: open the note(s) in their own window there
+          const outside = e.screenX < window.screenX || e.screenX > window.screenX + window.outerWidth || e.screenY < window.screenY || e.screenY > window.screenY + window.outerHeight;
+          if (p.onOpenWindow && e.dataTransfer.dropEffect === 'none' && outside && (e.screenX !== 0 || e.screenY !== 0)) {
+            ids.slice(0, 4).forEach((id, i) => p.onOpenWindow!(id, e.screenX + i * 40, e.screenY + i * 40));
+          }
+        }}
+        onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
+        onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); p.onOpenNewTab(n.id); } }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          const ids = p.selection.has(n.id) ? selectedIds : [n.id];
+          if (!p.selection.has(n.id)) p.setSelection(new Set([n.id]));
+          setMenu({ x: Math.min(e.clientX, window.innerWidth - 240), y: Math.min(e.clientY, window.innerHeight - 300), ids });
+        }}
         onDragOver={(e) => onDragOverRow(e, n, zone, idx)}
         onClick={(e) => click(e, n.id)}>
         <div className="note-title">
@@ -155,6 +176,26 @@ export function NoteList(p: Props) {
           : anyPinned && <button title="Unpin" onClick={() => void p.run('Unpinning…', () => store.pinNotes(selectedIds, false))}>Unpin{selectedIds.length > 1 ? ` ${selectedIds.length}` : ''}</button>)}
         {selectedIds.length > 1 && <span className="small">{selectedIds.length} selected</span>}
       </div>
+      {menu && (
+        <div className="ctx-back" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}>
+          <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
+            {menu.ids.length > 1 && <div className="ctx-title">{menu.ids.length} notes</div>}
+            {!p.trash && <>
+              <button onClick={() => { setMenu(null); menu.ids.forEach((id) => p.onOpenNewTab(id)); }}>Open in new tab</button>
+              {p.onOpenWindow && <button onClick={() => { setMenu(null); menu.ids.slice(0, 4).forEach((id) => p.onOpenWindow!(id, 0, 0)); }}>Open in new window</button>}
+              <hr />
+              <button onClick={() => { setMenu(null); p.onAddToFolder(menu.ids); }}>📁 Add to folder…</button>
+              {menu.ids.some((id) => store.state.notes.get(id)?.folder_id) && <button onClick={() => { setMenu(null); void p.run('Removing from folder…', () => store.moveNotesToFolder(menu.ids, null)); }}>Remove from folder</button>}
+              {menu.ids.some((id) => !store.isPinned(store.state.notes.get(id)!))
+                ? <button onClick={() => { setMenu(null); void p.run('Pinning…', () => store.pinNotes(menu.ids, true)); }}>📌 Pin to top</button>
+                : <button onClick={() => { setMenu(null); void p.run('Unpinning…', () => store.pinNotes(menu.ids, false)); }}>Unpin</button>}
+              <hr />
+              <button className="danger" onClick={() => { setMenu(null); p.onTrash(menu.ids); }}>Move to Trash</button>
+            </>}
+            {p.trash && <button onClick={() => { setMenu(null); void p.run('Restoring…', () => store.updateNotes(menu.ids.map((id) => ({ id, patch: { deleted: false } })))); }}>Restore</button>}
+          </div>
+        </div>
+      )}
       <div className="list-items" ref={listEl} onScroll={(e) => saveScroll('list', (e.target as HTMLElement).scrollTop)} onDrop={onDrop} onDragOver={(e) => { if (e.dataTransfer.types.includes(DRAG_TYPE)) e.preventDefault(); }}
         onDragLeave={(e) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setDrop(null); }}>
         {pinned.length > 0 && <div className="list-section">Pinned</div>}

@@ -97,7 +97,8 @@ export async function importOneNoteExport(data: ArrayBuffer, onProgress: (done: 
     try {
       const xml = await zip.file(zp)!.async('string');
       const out = convertPage(xml, parser, uid, mimeFor);
-      const folder_id = ensureFolder(p.path);
+      // Everything goes into the main list (no Notebook / Section folders) — organise with your own folders
+      const folder_id: string | null = null; void ensureFolder;
       const created = out.created ?? t0;
       const pageDate = out.modified ?? created;
       const key = `${folder_id}\u0000${out.title}`;

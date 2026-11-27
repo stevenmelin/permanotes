@@ -41,11 +41,26 @@ async function saveLocal(kind: 'folders', items: Folder[], fromSync?: boolean): 
 async function saveLocal(kind: 'notes', items: Note[], fromSync?: boolean): Promise<void>;
 async function saveLocal(kind: 'attachments', items: AttachmentMeta[], fromSync?: boolean): Promise<void>;
 async function saveLocal(kind: 'folders' | 'notes' | 'attachments', items: (Folder | Note | AttachmentMeta)[], fromSync = false) {
+  if (!items.length) return;
   await db.putMany(kind, items);
   const map = state[kind] as Map<string, Folder | Note | AttachmentMeta>;
   for (const it of items) map.set(it.id, it);
   emit();
   if (!fromSync) changeHook();
+  // keep other PermaNotes windows on this device (side-by-side note windows) in step
+  try { channel?.postMessage({ kind, items, fromSync }); } catch (e) { console.error('Could not tell other windows about a change:', e); }
+}
+
+// Other windows on this device share the same local database; this mirrors their changes into memory.
+const channel: BroadcastChannel | null = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('permanotes-store') : null;
+if (channel) {
+  channel.onmessage = (ev: MessageEvent<{ kind: 'folders' | 'notes' | 'attachments'; items: (Folder | Note | AttachmentMeta)[]; fromSync: boolean }>) => {
+    const { kind, items, fromSync } = ev.data;
+    const map = state[kind] as Map<string, Folder | Note | AttachmentMeta>;
+    for (const it of items) map.set(it.id, it);
+    emit();
+    if (!fromSync) changeHook(); // the main window uploads edits made in other windows
+  };
 }
 export { saveLocal };
 
@@ -71,15 +86,43 @@ export function descendantFolderIds(id: string): string[] {
   return out;
 }
 
-export async function deleteFolder(id: string) {
+/** Delete a folder (and its subfolders). keepNotes: notes go back to the main list; otherwise they go to Trash. */
+export async function deleteFolder(id: string, keepNotes = false) {
   const ids = descendantFolderIds(id);
   const t = now();
   const folders = ids.map((fid) => ({ ...state.folders.get(fid)!, deleted: true, updated_at: t, dirty: true }));
   const notes = [...state.notes.values()].filter((n) => n.folder_id && ids.includes(n.folder_id) && !n.deleted)
-    .map((n) => ({ ...n, deleted: true, updated_at: t, dirty: true }));
+    .map((n) => (keepNotes ? { ...n, folder_id: null, updated_at: t, dirty: true } : { ...n, deleted: true, pinned: null, updated_at: t, dirty: true }));
   await saveLocal('notes', notes);
   await saveLocal('folders', folders);
+  if (!keepNotes) await renumberPins();
 }
+
+export async function moveNotesToFolder(ids: string[], folderId: string | null) {
+  await updateNotes(ids.map((id) => ({ id, patch: { folder_id: folderId } })));
+}
+
+// The OneNote import (before 1.0.12) put every note in "Notebook / Section" folders. Those folders are
+// removed and their notes moved to the main list. Only folders made by the import qualify: created before
+// this version and holding nothing but OneNote pages — folders you make yourself are never touched.
+const IMPORT_FOLDER_CUTOFF = '2026-11-27T16:00:00.000Z';
+export async function flattenImportedFolders(): Promise<number> {
+  const live = liveFolders();
+  let moved = 0;
+  for (const top of live.filter((f) => !f.parent_id)) {
+    const ids = descendantFolderIds(top.id);
+    const subtree = ids.map((i) => state.folders.get(i)!).filter((f) => !f.deleted);
+    if (subtree.some((f) => normIso(f.updated_at) >= IMPORT_FOLDER_CUTOFF)) continue;
+    const notes = liveNotes().filter((n) => n.folder_id && ids.includes(n.folder_id));
+    if (!notes.length || notes.some((n) => !n.tags.includes('onenote'))) continue;
+    const t = now();
+    await saveLocal('notes', notes.map((n) => ({ ...n, folder_id: null, updated_at: t, dirty: true })));
+    await saveLocal('folders', subtree.map((f) => ({ ...f, deleted: true, updated_at: t, dirty: true })));
+    moved += notes.length;
+  }
+  return moved;
+}
+const normIso = (s: string) => { const d = Date.parse(s.replace(/(\.\d{3})\d+/, '$1')); return Number.isNaN(d) ? s : new Date(d).toISOString(); };
 
 // ---------- notes ----------
 export async function createNote(folder_id: string | null, title = '', html = '<p></p>', tags: string[] = []): Promise<Note> {

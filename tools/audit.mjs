@@ -219,6 +219,19 @@ check(/ListJoin,/.test(r('src/components/Editor.tsx')), 'list joining (continuou
 check(/sameList[\s\S]*b\.attrs\.split/.test(r('src/components/ListJoin.ts')) && /addGlobalAttributes/.test(r('src/components/ListJoin.ts')), 'split lists must be kept apart by the auto-join (data-split attribute on every list type)');
 check(/splitListHere\(editor\)/.test(r('src/components/Editor.tsx')) && /onContextMenu=/.test(r('src/components/Editor.tsx')), 'Split list is missing from the toolbar or the right-click menu');
 
+// 1.0.12: tabs, note windows, custom folders
+const app2 = r('src/App.tsx'), store2 = r('src/lib/store.ts'), nl = r('src/components/NoteList.tsx');
+check(/localStorage\.setItem\('pn\.tabs'/.test(app2) && /className="tabs"/.test(app2), 'note tabs missing or not remembered');
+check(/onAuxClick/.test(nl) && /onOpenNewTab/.test(nl), 'middle-click / Open in new tab missing in the note list');
+check(/dropEffect === 'none' && outside/.test(nl) && /openNoteWindow\(/.test(app2), 'dragging a note out of the window does not open a note window');
+check(/new BroadcastChannel\('permanotes-store'\)/.test(store2) && /channel\?\.postMessage/.test(store2), 'note windows would not see each other\'s edits (no BroadcastChannel)');
+check(/if \(SOLO_NOTE\) return;\s*\n?\s*await startSync\(\)/.test(r('src/main.tsx').replace(/\/\/[^\n]*\n/g, '')), 'note windows must not run their own sync (the main window syncs)');
+check(/win\.on\('closed', \(\) => \{ win = null; app\.quit\(\); \}\)/.test(main), 'closing the main window must close note windows too');
+check(/deleteFolder\(id: string, keepNotes/.test(store2) && /askChoice\(`Delete the folder/.test(app2), 'deleting a folder must offer keep-notes vs delete-notes');
+check(/Add to folder/.test(nl) && /addToFolder/.test(app2), 'right-click › Add to folder missing');
+check(/const folder_id: string \| null = null;/.test(r('src/lib/onenoteImport.ts')), 'OneNote import must not create Notebook/Section folders any more');
+check(/IMPORT_FOLDER_CUTOFF/.test(store2), 'old OneNote import folders are never flattened');
+
 const rel = relative(process.cwd(), ROOT) || '.';
 if (problems.length) {
   console.error(`\nAUDIT FAILED — ${problems.length} problem(s) in ${checks} checks (${rel}):`);
