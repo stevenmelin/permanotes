@@ -223,7 +223,9 @@ check(/splitListHere\(editor\)/.test(r('src/components/Editor.tsx')) && /onConte
 const app2 = r('src/App.tsx'), store2 = r('src/lib/store.ts'), nl = r('src/components/NoteList.tsx');
 check(/localStorage\.setItem\('pn\.tabs'/.test(app2) && /className="tabs"/.test(app2), 'note tabs missing or not remembered');
 check(/onAuxClick/.test(nl) && /onOpenNewTab/.test(nl), 'middle-click / Open in new tab missing in the note list');
-check(/dropEffect === 'none' && outside/.test(nl) && /openNoteWindow\(/.test(app2), 'dragging a note out of the window does not open a note window');
+check(/onDraggedOut\(ids\)/.test(nl) && /dragEnded\(ids\)/.test(app2) && /getCursorScreenPoint/.test(main), 'dragging a note out must be decided by the real mouse position (page drop coordinates are 0 on Mac — 1.0.12 bug)');
+check(!/setData\('text\/plain'/.test(nl), 'note drags must not carry plain text (Finder makes a text clipping instead of a note window)');
+check(/draggable=\{!!n/.test(app2) && /dragEnded\(\[n\.id\]\)/.test(app2), 'tabs must be draggable out into their own window');
 check(/new BroadcastChannel\('permanotes-store'\)/.test(store2) && /channel\?\.postMessage/.test(store2), 'note windows would not see each other\'s edits (no BroadcastChannel)');
 check(/if \(SOLO_NOTE\) return;\s*\n?\s*await startSync\(\)/.test(r('src/main.tsx').replace(/\/\/[^\n]*\n/g, '')), 'note windows must not run their own sync (the main window syncs)');
 check(/win\.on\('closed', \(\) => \{ win = null; app\.quit\(\); \}\)/.test(main), 'closing the main window must close note windows too');

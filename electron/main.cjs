@@ -242,6 +242,18 @@ function createNoteWindow(noteId, x, y) {
   return w;
 }
 ipcMain.handle('pn:open-note-window', (_e, noteId, x, y) => { createNoteWindow(String(noteId), Number(x), Number(y)); });
+// A note or tab drag just ended. If the mouse is outside the window it came from, open each note in its own
+// window right there. (The drop position the page sees is unreliable on Mac, so the real cursor decides.)
+ipcMain.handle('pn:drag-ended', (e, noteIds) => {
+  const w = BrowserWindow.fromWebContents(e.sender);
+  if (!w || !Array.isArray(noteIds) || !noteIds.length) return false;
+  const p = screen.getCursorScreenPoint();
+  const b = w.getBounds();
+  const inside = p.x >= b.x && p.x <= b.x + b.width && p.y >= b.y && p.y <= b.y + b.height;
+  if (inside) return false;
+  noteIds.slice(0, 4).forEach((id, i) => createNoteWindow(String(id), p.x + i * 40, p.y + i * 40));
+  return true;
+});
 
 // ---------- IPC ----------
 const backupDir = () => path.join(app.getPath('documents'), 'PermaNotes Backups');

@@ -20,6 +20,7 @@ interface Props {
   run: (label: string, fn: () => Promise<unknown>) => Promise<void>;
   onOpenNewTab: (id: string) => void;
   onOpenWindow?: (id: string, screenX: number, screenY: number) => void; // desktop only
+  onDraggedOut?: (ids: string[]) => void; // desktop only: a drag ended (maybe outside the window)
   onAddToFolder: (ids: string[]) => void; // asks which folder
   onTrash: (ids: string[]) => void;
 }
@@ -77,7 +78,7 @@ export function NoteList(p: Props) {
     dragging.current = ids;
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData(DRAG_TYPE, JSON.stringify(ids));
-    e.dataTransfer.setData('text/plain', ids.map((i) => store.state.notes.get(i)?.title ?? '').join('\n'));
+    // no plain-text copy: on a Mac, Finder would accept it and make a text clipping instead of a note window
   };
 
   // Work out where the line goes from the mouse position over a row
@@ -132,14 +133,11 @@ export function NoteList(p: Props) {
       <div className={`note-item${n.id === p.openId ? ' active' : ''}${p.selection.has(n.id) ? ' selected' : ''}`}
         draggable={!p.trash}
         onDragStart={(e) => onDragStart(e, n.id)}
-        onDragEnd={(e) => {
+        onDragEnd={() => {
           const ids = dragging.current;
           setDrop(null); dragging.current = [];
           // dropped outside the PermaNotes window: open the note(s) in their own window there
-          const outside = e.screenX < window.screenX || e.screenX > window.screenX + window.outerWidth || e.screenY < window.screenY || e.screenY > window.screenY + window.outerHeight;
-          if (p.onOpenWindow && e.dataTransfer.dropEffect === 'none' && outside && (e.screenX !== 0 || e.screenY !== 0)) {
-            ids.slice(0, 4).forEach((id, i) => p.onOpenWindow!(id, e.screenX + i * 40, e.screenY + i * 40));
-          }
+          if (p.onDraggedOut && ids.length) p.onDraggedOut(ids);
         }}
         onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
         onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); p.onOpenNewTab(n.id); } }}

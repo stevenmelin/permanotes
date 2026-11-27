@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Editor } from './components/Editor';
 import { PromptHost, askChoice, askText } from './components/Prompt';
 import { ConflictView } from './components/ConflictView';
 import { NoteList, DRAG_TYPE, type SortMode } from './components/NoteList';
+const TAB_TYPE = 'application/x-permanotes-tab';
 import { Settings } from './components/Settings';
 import { ImportDialog } from './components/ImportDialog';
 import * as store from './lib/store';
@@ -57,6 +58,7 @@ export default function App() {
   useEffect(() => { if (!SOLO_NOTE) try { localStorage.setItem('pn.tabs', JSON.stringify(tabs)); } catch { /* ignore */ } }, [tabs]);
   const selected = tabs.list[tabs.active] ?? null;
   const setSelected = (id: string | null) => setTabs((t) => ({ ...t, list: t.list.map((x, i) => (i === t.active ? id : x)) }));
+  const draggingTab = useRef<number | null>(null);
   const openInNewTab = (id: string | null) => setTabs((t) => ({ list: [...t.list, id], active: t.list.length }));
   const closeTab = (i: number) => setTabs((t) => {
     if (t.list.length === 1) return { list: [null], active: 0 };
@@ -356,6 +358,7 @@ export default function App() {
             sortMode={sortMode} setSortMode={setSortMode} run={run}
             onOpenNewTab={(id) => { openInNewTab(id); setPane('note'); }}
             onOpenWindow={desktop ? (id, x, y) => void desktop!.openNoteWindow(id, x, y).catch((e) => fail(`Opening a new window failed: ${errText(e)}`)) : undefined}
+            onDraggedOut={desktop ? (ids) => void desktop!.dragEnded(ids).catch((e) => fail(`Opening a new window failed: ${errText(e)}`)) : undefined}
             onAddToFolder={(ids) => void addToFolder(ids)}
             onTrash={(ids) => { if (window.confirm(`Move ${ids.length} note${ids.length === 1 ? '' : 's'} to Trash?`)) void run('Deleting…', async () => { await store.updateNotes(ids.map((id) => ({ id, patch: { deleted: true, pinned: null } }))); await store.renumberPins(); }); }}
             snippet={(n) => noteText(n).slice(n.title.length + n.tags.join(' ').length + 2, n.title.length + 120)} />
@@ -363,12 +366,36 @@ export default function App() {
         <section className="note">
           {(desktop || !narrow || tabs.list.length > 1) && (
             <div className="tabs"
-              onDragOver={(e) => { if (e.dataTransfer.types.includes(DRAG_TYPE)) e.preventDefault(); }}
-              onDrop={(e) => { const ids = JSON.parse(e.dataTransfer.getData(DRAG_TYPE) || '[]') as string[]; if (ids.length) { e.preventDefault(); ids.forEach((id) => openInNewTab(id)); } }}>
+              onDragOver={(e) => { if (e.dataTransfer.types.includes(DRAG_TYPE) || e.dataTransfer.types.includes(TAB_TYPE)) e.preventDefault(); }}
+              onDrop={(e) => {
+                const tabFrom = e.dataTransfer.getData(TAB_TYPE);
+                if (tabFrom !== '') {
+                  // reorder: drop onto a tab = move there; onto empty bar space = move to the end
+                  e.preventDefault();
+                  draggingTab.current = null;
+                  const from = Number(tabFrom);
+                  const target = (e.target as HTMLElement).closest('.tab') as HTMLElement | null;
+                  const to = target ? Number(target.dataset.index) : tabs.list.length - 1;
+                  if (from !== to) setTabs((t) => { const list = [...t.list]; const [m] = list.splice(from, 1); list.splice(to, 0, m); return { list, active: to }; });
+                  return;
+                }
+                const ids = JSON.parse(e.dataTransfer.getData(DRAG_TYPE) || '[]') as string[];
+                if (ids.length) { e.preventDefault(); ids.forEach((id) => openInNewTab(id)); }
+              }}>
               {tabs.list.map((id, i) => {
                 const n = id ? store.state.notes.get(id) : undefined;
                 return (
-                  <div key={i} className={`tab${i === tabs.active ? ' on' : ''}`} title={n?.title || 'New tab'}
+                  <div key={i} data-index={i} className={`tab${i === tabs.active ? ' on' : ''}`} title={n ? `${n.title || 'Untitled'} — drag out of the window to open it separately` : 'New tab'}
+                    draggable={!!n && !SOLO_NOTE}
+                    onDragStart={(e) => { draggingTab.current = i; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData(TAB_TYPE, String(i)); }}
+                    onDragEnd={() => {
+                      // still set = not dropped on the tab bar; if it left the window, it becomes its own window
+                      if (draggingTab.current === i && n && desktop) {
+                        draggingTab.current = null;
+                        void desktop.dragEnded([n.id]).then((opened) => { if (opened) closeTab(i); }).catch((err) => fail(`Opening a new window failed: ${errText(err)}`));
+                      }
+                      draggingTab.current = null;
+                    }}
                     onClick={() => setTabs((t) => ({ ...t, active: i }))}
                     onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
                     onAuxClick={(e) => { if (e.button === 1) closeTab(i); }}>

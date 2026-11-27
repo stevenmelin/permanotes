@@ -11,6 +11,8 @@ export interface DesktopBridge {
   version(): Promise<string>;
   onMenu(cb: (id: string) => void): void;
   openNoteWindow(noteId: string, screenX: number, screenY: number): Promise<void>;
+  /** a note/tab drag ended; opens note windows if it was dropped outside this window. True if it did. */
+  dragEnded(noteIds: string[]): Promise<boolean>;
 }
 
 declare global { interface Window { permanotes?: DesktopBridge } }
