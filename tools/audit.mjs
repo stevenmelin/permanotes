@@ -210,6 +210,10 @@ check(/pn\.last/.test(r('src/App.tsx')), 'last opened note is not remembered');
 check(/ref=\{scroller\}[^>]*onScroll=/.test(r('src/components/Editor.tsx')) && /restoreScroll\(el, getScroll\(`note:/.test(r('src/components/Editor.tsx')), 'note scroll position is not saved/restored');
 check(/pagehide/.test(r('src/lib/scrollmem.ts')) && /visibilitychange/.test(r('src/lib/scrollmem.ts')), 'scroll position must be flushed when the app closes or goes to background (iPhone)');
 
+// 1.0.10: emoji fonts from OneNote leaked into the text typed after an emoji
+check(/EmojiFontCleanup,/.test(r('src/components/Editor.tsx')), 'emoji font cleanup is not registered in the editor');
+check(/emoji\|segoe ui symbol/i.test(r('src/lib/onenote.ts')), 'OneNote importer must drop emoji-only fonts');
+
 const rel = relative(process.cwd(), ROOT) || '.';
 if (problems.length) {
   console.error(`\nAUDIT FAILED — ${problems.length} problem(s) in ${checks} checks (${rel}):`);

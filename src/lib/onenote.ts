@@ -237,7 +237,8 @@ export function styleWrap(css: string, ctx: { defaultFont: string; defaultSize: 
   const color = decl.get('color');
   if (color && !PLAIN_COLORS.has(color.toLowerCase())) span.push(`color: ${color}`);
   const font = decl.get('font-family');
-  if (font && font.toLowerCase() !== 'inherit' && font.replace(/['"]/g, '').toLowerCase() !== ctx.defaultFont) span.push(`font-family: ${font.replace(/"/g, "'")}`);
+  // emoji-only fonts are dropped: they leaked into text typed after an emoji
+  if (font && font.toLowerCase() !== 'inherit' && !/emoji|segoe ui symbol|noto color|twemoji/i.test(font) && font.replace(/['"]/g, '').toLowerCase() !== ctx.defaultFont) span.push(`font-family: ${font.replace(/"/g, "'")}`);
   const size = decl.get('font-size');
   if (size) {
     const pt = parseFloat(size);

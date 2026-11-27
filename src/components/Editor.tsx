@@ -9,6 +9,7 @@ import Image from '@tiptap/extension-image';
 import { Placeholder } from '@tiptap/extensions';
 import { AttachmentNode } from './AttachmentNode';
 import { Indent, indentLess, indentMore } from './Indent';
+import { EmojiFontCleanup } from './EmojiFont';
 import { askText } from './Prompt';
 import { getNoteZoom, onNoteZoom } from '../lib/viewprefs';
 import { getScroll, restoreScroll, saveScroll } from '../lib/scrollmem';
@@ -43,6 +44,7 @@ export const editorExtensions = [
   Image.configure({ allowBase64: false }),
   AttachmentNode,
   Indent,
+  EmojiFontCleanup,
   Placeholder.configure({ placeholder: 'Start writing…' }),
 ];
 

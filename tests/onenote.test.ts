@@ -104,3 +104,12 @@ test('keeps OneNote colors, highlights, fonts and list styles', () => {
   assert.match(h, /<span style="color: #747474; font-family: Aptos; font-size: 20pt">Big grey<\/span>/);
   assert.match(h, /<p><\/p>$/, 'blank lines are kept');
 });
+
+test('emoji-only fonts from OneNote are not carried over', () => {
+  const xml = `<one:Page xmlns:one="http://schemas.microsoft.com/office/onenote/2013/onenote" name="E"><one:Outline><one:OEChildren>
+    <one:OE><one:T><![CDATA[Game <span style='font-family:"Apple Color Emoji"'>🎮</span> night <span style='font-family:"Segoe UI Emoji";color:#FA0000'>🍿</span>]]></one:T></one:OE>
+  </one:OEChildren></one:Outline></one:Page>`;
+  const h = convertPage(xml, new DOMParser() as never, ids, mime).html;
+  assert.ok(!/Emoji/.test(h), h);
+  assert.match(h, /<span style="color: #FA0000">🍿<\/span>/, 'other formatting on the emoji is kept');
+});
